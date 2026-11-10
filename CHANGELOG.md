@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-11-10
+
+### Added
+- Integration icon and logo (light and dark, 1x and 2x) in `brand/`, shown by Home
+  Assistant 2026.3+. SVG sources and render script in `docs/brand/`.
+
 ## [0.2.1] - 2026-11-10
 
 ### Fixed

@@ -1,3 +1,5 @@
+<img src="custom_components/cheapest_hour_scheduler/brand/icon.png" alt="" width="96" align="right">
+
 # Cheapest Hour Scheduler
 
 Home Assistant custom integration that finds the **cheapest consecutive block of hours** in a dynamic energy price sensor and switches devices on (and off again) during that block: battery chargers, boilers, heat-pump boost, washing machines, dishwashers…
@@ -121,6 +123,10 @@ What you see, from left to right over time:
 * A red line marks **now**.
 
 The card reads its data through a websocket command (`cheapest_hour_scheduler/plan`), so it keeps working on the stored prices when the price sensor is unavailable.
+
+## Icon
+
+The integration ships its own icon and logo (light and dark) in `custom_components/cheapest_hour_scheduler/brand/`. Home Assistant 2026.3 and newer shows them automatically; older versions show a placeholder. Sources and the render script are in `docs/brand/` (`python docs/brand/make_brand.py` with Playwright installed).
 
 ## Development
 

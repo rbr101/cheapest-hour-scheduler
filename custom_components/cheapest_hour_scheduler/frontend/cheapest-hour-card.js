@@ -11,7 +11,7 @@
  * hours: 36                                   # optional, max hours shown
  */
 
-const CARD_VERSION = "0.2.1";
+const CARD_VERSION = "0.2.2";
 const WS_TYPE = "cheapest_hour_scheduler/plan";
 const REFRESH_MS = 60 * 1000;
 
