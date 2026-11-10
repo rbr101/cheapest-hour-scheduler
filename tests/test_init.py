@@ -163,3 +163,43 @@ async def test_ready_by_gets_own_window(hass):
     assert dt_util.parse_datetime(battery.state) == slot0 + timedelta(hours=20)
     assert tz is not None
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_uses_stored_prices_when_sensor_unavailable(hass, hass_storage):
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    values = [0.6] * 8 + [0.2] * 4 + [0.6] * 20
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [{"id": "a", "entity_id": "input_boolean.charger", "on_value": "on", "off_value": "off"}]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    expected = slot0 + timedelta(hours=2)
+    assert dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state) == expected
+
+    # Prices were persisted
+    stored = hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]
+    assert len(stored["prices"]) == 32
+
+    # Sensor goes away and HA (the integration) restarts: plan is rebuilt from storage
+    hass.states.async_set("sensor.price", "unavailable", {})
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.test_block_start")
+    assert dt_util.parse_datetime(state.state) == expected
+    assert state.attributes["price_source"] == "cache"
+    assert float(hass.states.get("sensor.test_block_average_price").state) == pytest.approx(0.2)
+
+    # And the device still switches
+    async_fire_time_changed(hass, expected + timedelta(minutes=1))
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.charger").state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)

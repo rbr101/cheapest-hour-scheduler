@@ -7,6 +7,9 @@
   window (run time, or the block length) that ends before that time, e.g. 07:00.
 - Sensor per device record with its planned start (`sensor.<name>_start_<entity>`).
 - `waiting` attribute explaining why a device has no plan yet (e.g. waiting for prices).
+- Price data is persisted. When the price sensor is unavailable (or after a restart while
+  it is), planning and switching continue with the stored prices. New attributes
+  `price_source` and `prices_known_until` on the block-start sensor.
 
 ### Changed
 - Planning is done per device record; the shared block is still used by records

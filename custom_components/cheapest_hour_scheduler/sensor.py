@@ -48,6 +48,10 @@ class BlockStartSensor(SchedulerEntity, SensorEntity):
             "enabled": s.enabled,
             "last_planned": s.last_planned.isoformat() if s.last_planned else None,
             "last_error": s.last_error,
+            "price_source": s.price_source,
+            "prices_known_until": (
+                dt_util.as_local(s.prices_known_until).isoformat() if s.prices_known_until else None
+            ),
             "planned_actions": [_plan_attrs(p) for p in s.device_plans.values()],
             "waiting": {
                 d[CONF_ENTITY_ID]: s.waiting[d[CONF_DEVICE_ID]]

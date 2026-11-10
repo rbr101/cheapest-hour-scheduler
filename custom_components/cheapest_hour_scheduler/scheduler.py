@@ -62,6 +62,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
+PRICE_CACHE_KEEP = timedelta(days=1)  # keep prices of the past day, plus all future ones
 
 TOGGLE_DOMAINS = {
     "switch",
@@ -180,6 +181,10 @@ class CheapestHourScheduler:
         self.slots: list[PriceSlot] = []
         self.device_plans: dict[str, DevicePlan] = {}
         self.waiting: dict[str, str] = {}  # dev_id -> reason it has no plan
+        # Last known prices (merged from every sensor update and persisted), used
+        # when the price sensor is unavailable or temporarily has less data.
+        self._price_cache: dict[datetime, PriceSlot] = {}
+        self.price_source: str = "none"  # "sensor", "cache" or "none"
         self.last_planned: datetime | None = None
         self.last_error: str | None = None
 
@@ -221,6 +226,15 @@ class CheapestHourScheduler:
         except (KeyError, TypeError, ValueError):
             pass
 
+        for item in stored.get("prices") or []:
+            try:
+                start = dt_util.parse_datetime(item[0])
+                end = dt_util.parse_datetime(item[1])
+                if start and end:
+                    self._price_cache[start] = PriceSlot(start, end, float(item[2]))
+            except (IndexError, TypeError, ValueError):
+                continue
+
         by_id = {d[CONF_DEVICE_ID]: d for d in self.devices}
         for dev_id, data in (stored.get("plans") or {}).items():
             device = by_id.get(dev_id)
@@ -234,6 +248,10 @@ class CheapestHourScheduler:
         data: dict[str, Any] = {
             "enabled": self.enabled,
             "plans": {dev_id: p.to_store() for dev_id, p in self.device_plans.items()},
+            "prices": [
+                [slot.start.isoformat(), slot.end.isoformat(), slot.price]
+                for slot in sorted(self._price_cache.values(), key=lambda sl: sl.start)
+            ],
         }
         if self.block:
             data["block"] = {
@@ -264,16 +282,44 @@ class CheapestHourScheduler:
     # --------------------------------------------------------------- planning
 
     def _read_slots(self) -> list[PriceSlot]:
+        """Prices from the sensor, merged with (and falling back to) the cache."""
+        now = dt_util.utcnow()
         state = self.hass.states.get(self.price_sensor)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self.last_error = f"{self.price_sensor} is unavailable"
-            return []
-        slots = parse_prices(
-            state.attributes.get(ATTR_PRICES_TODAY),
-            state.attributes.get(ATTR_PRICES_TOMORROW),
-        )
-        self.last_error = None if slots else f"No prices in {self.price_sensor}"
+        fresh: list[PriceSlot] = []
+        if state is not None and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            fresh = parse_prices(
+                state.attributes.get(ATTR_PRICES_TODAY),
+                state.attributes.get(ATTR_PRICES_TOMORROW),
+            )
+
+        # New data wins; data the sensor no longer shows (e.g. yesterday after
+        # midnight, or everything while it is unavailable) is kept from the cache.
+        for slot in fresh:
+            self._price_cache[slot.start] = slot
+        cutoff = now - PRICE_CACHE_KEEP
+        self._price_cache = {k: v for k, v in self._price_cache.items() if v.end > cutoff}
+        slots = sorted(self._price_cache.values(), key=lambda sl: sl.start)
+
+        if fresh:
+            self.price_source = "sensor"
+            self.last_error = None
+        elif slots and slots[-1].end > now:
+            self.price_source = "cache"
+            self.last_error = (
+                f"{self.price_sensor} has no prices; using stored prices up to "
+                f"{dt_util.as_local(slots[-1].end):%a %H:%M}"
+            )
+            _LOGGER.debug(self.last_error)
+        else:
+            self.price_source = "none"
+            self.last_error = f"No prices from {self.price_sensor} and none stored"
         return slots
+
+    @property
+    def prices_known_until(self) -> datetime | None:
+        if not self._price_cache:
+            return None
+        return max(slot.end for slot in self._price_cache.values())
 
     def _plan_shared_block(self, now: datetime) -> None:
         """The entry-wide block, used by records without a ready-by time."""
