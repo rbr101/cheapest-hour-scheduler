@@ -2,6 +2,8 @@
 
 Home Assistant custom integration that finds the **cheapest consecutive block of hours** in a dynamic energy price sensor and switches devices on (and off again) during that block: battery chargers, boilers, heat-pump boost, washing machines, dishwashers…
 
+![Cheapest Hour Scheduler card](docs/card.png)
+
 Built for the Zonneplan sensor `sensor.zonneplan_current_tariff_rounded` (15-minute prices in the `prices_today` / `prices_tomorrow` attributes), but any sensor with attributes in this format works (hourly data too):
 
 ```yaml
@@ -96,6 +98,29 @@ As soon as a block is planned the integration writes the seconds from *now* unti
 | `binary_sensor.<name>_cheapest_block_active` | On during the block — handy for your own automations |
 | `switch.<name>_scheduler_enabled` | Master switch; off = no device actions |
 | `button.<name>_recalculate` | Force a recalculation |
+
+## Lovelace card
+
+The integration ships its own card; it is loaded automatically (no resource to add, no separate HACS plugin). After installing/updating, refresh the browser once.
+
+```yaml
+type: custom:cheapest-hour-card
+entity: sensor.cheapest_hours_block_start   # optional: any entity of the integration entry
+title: Goedkoopste uren                     # optional
+hours_back: 2                               # optional: hours of history before "now" (default 2)
+hours: 36                                   # optional: maximum number of hours shown
+```
+
+Without `entity` the card shows every Cheapest Hour Scheduler entry below each other.
+
+What you see, from left to right over time:
+
+* **Prices** per quarter (green = cheap, red = expensive; past prices faded) with the shared cheapest block highlighted.
+* A row per device record with a **bar for when it is on**: blue = planned, green = running now, grey = done. Hover a bar for the exact times, average price and the value that is sent.
+* An orange flag marks the device's **ready by** time.
+* A red line marks **now**.
+
+The card reads its data through a websocket command (`cheapest_hour_scheduler/plan`), so it keeps working on the stored prices when the price sensor is unavailable.
 
 ## Development
 

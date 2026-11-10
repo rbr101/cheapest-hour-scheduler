@@ -1,13 +1,21 @@
 {
   "domain": "cheapest_hour_scheduler",
   "name": "Cheapest Hour Scheduler",
-  "codeowners": ["@rbr101"],
+  "after_dependencies": [
+    "frontend"
+  ],
+  "codeowners": [
+    "@rbr101"
+  ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "http",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/rbr101/cheapest-hour-scheduler",
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/rbr101/cheapest-hour-scheduler/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

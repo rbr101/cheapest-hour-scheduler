@@ -1,8 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-11-10
 
 ### Added
+- Lovelace card `custom:cheapest-hour-card`, shipped with and auto-registered by the
+  integration: prices over time plus a bar per device for when it is on, ready-by
+  flags, shared block and a "now" line. Screenshot in the README.
+- Websocket command `cheapest_hour_scheduler/plan` providing prices and plans to the card.
 - Per device record an optional **ready by** time. The record gets its own cheapest
   window (run time, or the block length) that ends before that time, e.g. 07:00.
 - Sensor per device record with its planned start (`sensor.<name>_start_<entity>`).
