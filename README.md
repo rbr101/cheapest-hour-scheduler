@@ -83,7 +83,7 @@ As soon as a block is planned the integration writes the seconds from *now* unti
 * The cheapest block is the consecutive window (of the configured length) with the **lowest average price**, starting no earlier than the slot that is running now. On a tie the earliest window wins.
 * Replanning happens when the price sensor changes, every 5 minutes, and with the *Recalculate* button.
 * A block (or a device's own window) that **has started is locked**; it won't move even if new prices arrive.
-* After a block ends, the next block is searched from the end of the previous one (so it only runs once per available period of price data; typically one block per day once tomorrow's prices are published).
+* The shared block runs **at most once a day**: the next block starts at least 20 hours after the previous one started. With Zonneplan the next block is usually known in the afternoon, when tomorrow's prices are published. Records with *ready by* run once per ready-by moment.
 * **Price data is stored.** Every update of the price sensor is merged into a local copy (kept in `.storage`, prices of the past day plus all future ones). When the sensor is unavailable, restarting, or temporarily shows less data, planning continues with the stored prices. The attributes `price_source` (`sensor` / `cache` / `none`) and `prices_known_until` on the block-start sensor show what is being used.
 * The plan and which actions were already executed are stored, so a restart doesn't switch things twice. If HA was down at the start moment but the run time has not passed yet, the start action is applied as soon as HA is back.
 
@@ -125,6 +125,7 @@ The card reads its data through a websocket command (`cheapest_hour_scheduler/pl
 ## Development
 
 ```bash
-pip install pytest pyyaml
-pytest tests/test_planner.py
+pip install pytest pyyaml                      # planner tests only
+pip install pytest-homeassistant-custom-component  # full Home Assistant tests
+pytest
 ```

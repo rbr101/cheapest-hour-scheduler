@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.1] - 2026-11-10
+
+### Fixed
+- The shared block could run again right after it ended (or twice a day) because the
+  next block was searched directly from the end of the previous one. It now runs at
+  most once a day: the next block starts at least 20 hours after the previous start.
+
+### Added
+- Home Assistant integration tests now run (config flow, switching, ready-by, stored
+  prices, websocket) and are part of CI.
+
 ## [0.2.0] - 2026-11-10
 
 ### Added

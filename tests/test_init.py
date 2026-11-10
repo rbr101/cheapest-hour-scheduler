@@ -21,7 +21,7 @@ def _prices(start, values):
     ]
 
 
-async def test_schedules_devices(hass):
+async def test_schedules_devices(hass, freezer):
     now = dt_util.utcnow().replace(second=0, microsecond=0)
     slot0 = now - timedelta(minutes=now.minute % 15)
     # Expensive now, cheap from +2h for 1h, expensive after.
@@ -66,13 +66,15 @@ async def test_schedules_devices(hass):
     assert hass.states.get("input_boolean.charger").state == "off"
 
     # Jump into the block
-    async_fire_time_changed(hass, slot0 + timedelta(hours=2, minutes=1))
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=1))
+    async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "on"
     assert hass.states.get("binary_sensor.test_cheapest_block_active").state == "on"
 
     # After the block
-    async_fire_time_changed(hass, slot0 + timedelta(hours=3, minutes=1))
+    freezer.move_to(slot0 + timedelta(hours=3, minutes=1))
+    async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "off"
 
@@ -165,7 +167,7 @@ async def test_ready_by_gets_own_window(hass):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_uses_stored_prices_when_sensor_unavailable(hass, hass_storage):
+async def test_uses_stored_prices_when_sensor_unavailable(hass, hass_storage, freezer):
     now = dt_util.utcnow().replace(second=0, microsecond=0)
     slot0 = now - timedelta(minutes=now.minute % 15)
     values = [0.6] * 8 + [0.2] * 4 + [0.6] * 20
@@ -199,7 +201,8 @@ async def test_uses_stored_prices_when_sensor_unavailable(hass, hass_storage):
     assert float(hass.states.get("sensor.test_block_average_price").state) == pytest.approx(0.2)
 
     # And the device still switches
-    async_fire_time_changed(hass, expected + timedelta(minutes=1))
+    freezer.move_to(expected + timedelta(minutes=1))
+    async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "on"
     assert await hass.config_entries.async_unload(entry.entry_id)

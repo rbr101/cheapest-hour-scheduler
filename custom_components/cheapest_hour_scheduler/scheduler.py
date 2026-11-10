@@ -62,7 +62,10 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
-PRICE_CACHE_KEEP = timedelta(days=1)  # keep prices of the past day, plus all future ones
+PRICE_CACHE_KEEP = timedelta(days=1)
+# The shared block runs at most once a day: the next one starts at least this
+# long after the previous one started (gives some room to move within the day).
+SHARED_BLOCK_MIN_GAP = timedelta(hours=20)  # keep prices of the past day, plus all future ones
 
 TOGGLE_DOMAINS = {
     "switch",
@@ -185,6 +188,7 @@ class CheapestHourScheduler:
         # when the price sensor is unavailable or temporarily has less data.
         self._price_cache: dict[datetime, PriceSlot] = {}
         self.price_source: str = "none"  # "sensor", "cache" or "none"
+        self._last_block_start: datetime | None = None  # last finished shared block
         self.last_planned: datetime | None = None
         self.last_error: str | None = None
 
@@ -226,6 +230,9 @@ class CheapestHourScheduler:
         except (KeyError, TypeError, ValueError):
             pass
 
+        if stored.get("last_block_start"):
+            self._last_block_start = dt_util.parse_datetime(stored["last_block_start"])
+
         for item in stored.get("prices") or []:
             try:
                 start = dt_util.parse_datetime(item[0])
@@ -253,6 +260,8 @@ class CheapestHourScheduler:
                 for slot in sorted(self._price_cache.values(), key=lambda sl: sl.start)
             ],
         }
+        if self._last_block_start:
+            data["last_block_start"] = self._last_block_start.isoformat()
         if self.block:
             data["block"] = {
                 "start": self.block.start.isoformat(),
@@ -327,11 +336,25 @@ class CheapestHourScheduler:
         if old and old.start <= now < old.end:
             new = old  # running: locked
         elif old and old.end <= now:
-            new = find_cheapest_block(self.slots, self.block_hours, now, not_before=old.end)
+            new = find_cheapest_block(
+                self.slots,
+                self.block_hours,
+                now,
+                not_before=max(old.end, old.start + SHARED_BLOCK_MIN_GAP),
+            )
+            if new is None:
+                self.block = None
+                self._last_block_start = old.start
+                return
         else:
-            new = find_cheapest_block(self.slots, self.block_hours, now)
+            not_before = None
+            if self._last_block_start is not None:
+                not_before = self._last_block_start + SHARED_BLOCK_MIN_GAP
+            new = find_cheapest_block(self.slots, self.block_hours, now, not_before=not_before)
             if new is None and old and old.end > now:
                 new = old  # keep what we had if data vanished
+        if old and old.end <= now:
+            self._last_block_start = old.start
         # Fill in slots for a block restored from storage.
         if new and not new.slots and self.slots:
             match = tuple(s for s in self.slots if new.start <= s.start < new.end)
@@ -351,7 +374,7 @@ class CheapestHourScheduler:
 
         if ready_by is None:
             if self.block is None or self.block.end <= now:
-                self.waiting[dev_id] = "no price data"
+                self.waiting[dev_id] = "waiting for the next block (needs prices)"
                 return None
             start = self.block.start + timedelta(minutes=float(device.get(CONF_OFFSET) or 0))
             run_end = start + timedelta(hours=float(device[CONF_DURATION])) if device.get(CONF_DURATION) else self.block.end
