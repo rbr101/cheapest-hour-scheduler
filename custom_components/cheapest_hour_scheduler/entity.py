@@ -17,11 +17,13 @@ class SchedulerEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, scheduler: CheapestHourScheduler, key: str) -> None:
+    def __init__(
+        self, scheduler: CheapestHourScheduler, key: str, unique_suffix: str | None = None
+    ) -> None:
         self.scheduler = scheduler
         entry = scheduler.entry
         self._attr_translation_key = key
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix or key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,

@@ -49,3 +49,35 @@ def test_not_before():
         SLOTS, 2, t("2026-11-10T08:00:00+01:00"), not_before=t("2026-11-11T00:00:00+01:00")
     )
     assert block.start >= t("2026-11-11T00:00:00+01:00")
+
+
+AMS = __import__("zoneinfo").ZoneInfo("Europe/Amsterdam")
+
+
+def test_deadline_limits_window():
+    # Dishwasher, 2 hours, ready by 04:00 tomorrow
+    deadline = planner.next_occurrence(t("2026-11-10T17:21:00+01:00"), planner.parse_time_of_day("04:00"), AMS)
+    assert deadline == t("2026-11-11T04:00:00+01:00")
+    block = planner.find_cheapest_block(SLOTS, 2, t("2026-11-10T17:21:00+01:00"), deadline=deadline)
+    assert block.end <= deadline
+    assert block.start == t("2026-11-11T02:00:00+01:00")
+
+
+def test_next_occurrence_rolls_over():
+    at = planner.parse_time_of_day("07:00:00")
+    assert planner.next_occurrence(t("2026-11-10T06:59:00+01:00"), at, AMS) == t("2026-11-10T07:00:00+01:00")
+    assert planner.next_occurrence(t("2026-11-10T07:00:00+01:00"), at, AMS) == t("2026-11-11T07:00:00+01:00")
+
+
+def test_next_occurrence_dst():
+    # Switch to winter time: Sunday 25 Oct 2026, clocks go back at 03:00
+    at = planner.parse_time_of_day("07:00")
+    got = planner.next_occurrence(t("2026-10-24T05:00:00+02:00"), at, AMS)
+    assert got == t("2026-10-24T07:00:00+02:00")
+    got = planner.next_occurrence(t("2026-10-24T20:00:00+02:00"), at, AMS)
+    assert got == t("2026-10-25T07:00:00+01:00")  # 7:00 local, 13 real hours later
+
+
+def test_covers():
+    assert planner.covers(SLOTS, t("2026-11-12T00:00:00+01:00"))
+    assert not planner.covers(SLOTS, t("2026-11-12T00:15:00+01:00"))

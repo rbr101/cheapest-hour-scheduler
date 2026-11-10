@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_ENTITY_ID, CONF_ON_VALUE, DOMAIN
+from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, CONF_ON_VALUE, CONF_READY_BY, DOMAIN
 from .entity import SchedulerEntity
 from .scheduler import CheapestHourScheduler
 
@@ -26,6 +26,7 @@ async def async_setup_entry(
             BlockEndSensor(scheduler, "block_end"),
             BlockPriceSensor(scheduler, "block_average_price"),
         ]
+        + [DeviceStartSensor(scheduler, device) for device in scheduler.devices]
     )
 
 
@@ -41,25 +42,63 @@ class BlockStartSensor(SchedulerEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         s = self.scheduler
-        local = dt_util.as_local
         return {
             "block_hours": s.block_hours,
             "price_sensor": s.price_sensor,
             "enabled": s.enabled,
             "last_planned": s.last_planned.isoformat() if s.last_planned else None,
             "last_error": s.last_error,
-            "planned_actions": [
-                {
-                    "entity_id": p.device[CONF_ENTITY_ID],
-                    "value": p.armed_value or p.device.get(CONF_ON_VALUE),
-                    "start": local(p.start).isoformat(),
-                    "end": local(p.end).isoformat() if p.end else None,
-                    "started": p.started,
-                    "stopped": p.stopped,
-                }
-                for p in s.device_plans.values()
-            ],
+            "planned_actions": [_plan_attrs(p) for p in s.device_plans.values()],
+            "waiting": {
+                d[CONF_ENTITY_ID]: s.waiting[d[CONF_DEVICE_ID]]
+                for d in s.devices
+                if d[CONF_DEVICE_ID] in s.waiting
+            },
         }
+
+
+def _plan_attrs(p) -> dict[str, Any]:
+    local = dt_util.as_local
+    return {
+        "entity_id": p.device[CONF_ENTITY_ID],
+        "value": p.armed_value or p.device.get(CONF_ON_VALUE),
+        "start": local(p.start).isoformat(),
+        "end": local(p.end).isoformat() if p.end else None,
+        "finished_at": local(p.run_end).isoformat(),
+        "ready_by": local(p.deadline).isoformat() if p.deadline else None,
+        "average_price": p.price,
+        "started": p.started,
+        "stopped": p.stopped,
+    }
+
+
+class DeviceStartSensor(SchedulerEntity, SensorEntity):
+    """Planned start of one device record."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:timer-play-outline"
+
+    def __init__(self, scheduler: CheapestHourScheduler, device: dict[str, Any]) -> None:
+        super().__init__(scheduler, "device_start", f"device_{device[CONF_DEVICE_ID]}")
+        self._dev_id = device[CONF_DEVICE_ID]
+        self._entity_id = device[CONF_ENTITY_ID]
+        self._ready_by = device.get(CONF_READY_BY)
+        self._attr_translation_placeholders = {"entity": self._entity_id.split(".", 1)[1]}
+
+    @property
+    def native_value(self) -> datetime | None:
+        plan = self.scheduler.device_plans.get(self._dev_id)
+        return plan.start if plan else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        plan = self.scheduler.device_plans.get(self._dev_id)
+        attrs: dict[str, Any] = {"entity_id": self._entity_id, "ready_by_time": self._ready_by}
+        if plan:
+            attrs.update(_plan_attrs(plan))
+        if self._dev_id in self.scheduler.waiting:
+            attrs["waiting"] = self.scheduler.waiting[self._dev_id]
+        return attrs
 
 
 class BlockEndSensor(SchedulerEntity, SensorEntity):

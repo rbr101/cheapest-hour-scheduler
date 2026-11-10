@@ -41,20 +41,22 @@
       },
       "add_device": {
         "title": "Add device",
-        "description": "The device is switched at the start of the cheapest block (plus offset) and switched back after the run time.",
+        "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
         "data": {
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
           "duration_hours": "Run time (hours, optional)",
-          "start_offset_minutes": "Start offset (minutes)"
+          "start_offset_minutes": "Start offset (minutes)",
+          "ready_by": "Ready by (optional)"
         },
         "data_description": {
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
           "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
           "duration_hours": "How long it must stay on. Empty = until the end of the block.",
-          "start_offset_minutes": "Start this many minutes after the block starts."
+          "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
+          "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
         }
       },
       "edit_device": {
@@ -65,20 +67,22 @@
       },
       "edit_device_form": {
         "title": "Edit device",
-        "description": "The device is switched at the start of the cheapest block (plus offset) and switched back after the run time.",
+        "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
         "data": {
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
           "duration_hours": "Run time (hours, optional)",
-          "start_offset_minutes": "Start offset (minutes)"
+          "start_offset_minutes": "Start offset (minutes)",
+          "ready_by": "Ready by (optional)"
         },
         "data_description": {
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
           "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
           "duration_hours": "How long it must stay on. Empty = until the end of the block.",
-          "start_offset_minutes": "Start this many minutes after the block starts."
+          "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
+          "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
         }
       },
       "remove_device": {
@@ -102,6 +106,9 @@
       },
       "block_average_price": {
         "name": "Block average price"
+      },
+      "device_start": {
+        "name": "Start {entity}"
       }
     },
     "binary_sensor": {

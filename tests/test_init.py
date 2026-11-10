@@ -119,3 +119,47 @@ async def test_config_flow(hass):
         {"entity_id": "number.keuken_dishwasher_start_in_relative", "on_value": "soon", "start_offset_minutes": 0},
     )
     assert result["errors"] == {"on_value": "not_a_number"}
+
+
+async def test_ready_by_gets_own_window(hass):
+    tz = dt_util.get_default_time_zone()
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    # 48 h of data: cheapest is at +20h, but the device must be ready at +6h,
+    # within that the cheapest hour is +3h..+4h.
+    values = [0.6] * 192
+    for i in range(12, 16):
+        values[i] = 0.4
+    for i in range(80, 84):
+        values[i] = 0.1
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    assert await async_setup_component(
+        hass, "input_boolean", {"input_boolean": {"boiler": {}, "battery": {}}}
+    )
+    await hass.async_block_till_done()
+    ready = dt_util.as_local(slot0 + timedelta(hours=6)).strftime("%H:%M:00")
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={
+            "devices": [
+                {"id": "a", "entity_id": "input_boolean.boiler", "on_value": "on",
+                 "off_value": "off", "duration_hours": 1, "ready_by": ready},
+                {"id": "b", "entity_id": "input_boolean.battery", "on_value": "on", "off_value": "off"},
+            ]
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    boiler = hass.states.get("sensor.test_start_boiler")
+    assert dt_util.parse_datetime(boiler.state) == slot0 + timedelta(hours=3)
+    battery = hass.states.get("sensor.test_start_battery")
+    assert dt_util.parse_datetime(battery.state) == slot0 + timedelta(hours=20)
+    assert tz is not None
+    assert await hass.config_entries.async_unload(entry.entry_id)

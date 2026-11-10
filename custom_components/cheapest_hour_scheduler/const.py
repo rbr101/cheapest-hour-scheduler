@@ -13,6 +13,7 @@ CONF_ON_VALUE = "on_value"
 CONF_OFF_VALUE = "off_value"
 CONF_DURATION = "duration_hours"
 CONF_OFFSET = "start_offset_minutes"
+CONF_READY_BY = "ready_by"
 
 DEFAULT_PRICE_SENSOR = "sensor.zonneplan_current_tariff_rounded"
 DEFAULT_BLOCK_HOURS = 3.0

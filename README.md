@@ -42,8 +42,18 @@ Open the integration → **Configure** → *Add device*. Each record:
 | Entity | `switch.battery_charger` | What to control |
 | Value at start | `on` | Value set at block start (+ offset) |
 | Value at end | `off` | Optional. Set after the run time. Empty = do nothing. |
-| Run time (h) | `2` | Optional. Empty = until the end of the block. |
-| Start offset (min) | `30` | Optional. Start N minutes after the block starts. |
+| Ready by | `07:00` | Optional. Time the device must be finished (see below). |
+| Run time (h) | `2` | Optional. Empty = until the end of the block (or the block length when *ready by* is set). |
+| Start offset (min) | `30` | Optional. Start N minutes after the block starts (only without *ready by*). |
+
+#### Ready by
+Without *ready by* a record follows the shared cheapest block of the integration.
+
+With *ready by* the record gets **its own** cheapest window of *run time* hours that ends at or before the next time the clock shows that time. Example: run time `3`, ready by `07:00` → the cheapest 3 hours between now and 07:00 tomorrow morning. After that run, it plans for the next 07:00.
+
+* The window is only fixed once the prices reach the *ready by* moment (Zonneplan publishes tomorrow's prices in the afternoon). Until then the device sensor shows `waiting` in its attributes.
+* If the prices still don't reach the deadline when the latest possible start comes close, the cheapest known window is used, or the device simply starts in time.
+* For the dishwasher set the run time to the program length, so `auto` sends the seconds until a start that finishes before *ready by*.
 
 How the value is applied depends on the entity domain:
 
@@ -70,7 +80,7 @@ As soon as a block is planned the integration writes the seconds from *now* unti
 
 * The cheapest block is the consecutive window (of the configured length) with the **lowest average price**, starting no earlier than the slot that is running now. On a tie the earliest window wins.
 * Replanning happens when the price sensor changes, every 5 minutes, and with the *Recalculate* button.
-* A block that **has started is locked**; it won't move even if new prices arrive.
+* A block (or a device's own window) that **has started is locked**; it won't move even if new prices arrive.
 * After a block ends, the next block is searched from the end of the previous one (so it only runs once per available period of price data; typically one block per day once tomorrow's prices are published).
 * The plan and which actions were already executed are stored, so a restart doesn't switch things twice. If HA was down at the start moment but the run time has not passed yet, the start action is applied as soon as HA is back.
 
@@ -81,6 +91,7 @@ As soon as a block is planned the integration writes the seconds from *now* unti
 | `sensor.<name>_block_start` | Start of the planned block (attribute `planned_actions` lists every device action) |
 | `sensor.<name>_block_end` | End of the planned block |
 | `sensor.<name>_block_average_price` | Average price of the block, with per-slot prices as attributes |
+| `sensor.<name>_start_<entity>` | Planned start per device record, with end, finished-at, ready-by and average price as attributes |
 | `binary_sensor.<name>_cheapest_block_active` | On during the block — handy for your own automations |
 | `switch.<name>_scheduler_enabled` | Master switch; off = no device actions |
 | `button.<name>_recalculate` | Force a recalculation |

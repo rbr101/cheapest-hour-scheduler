@@ -23,6 +23,7 @@ from .const import (
     CONF_OFFSET,
     CONF_ON_VALUE,
     CONF_PRICE_SENSOR,
+    CONF_READY_BY,
     DEFAULT_BLOCK_HOURS,
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
@@ -72,6 +73,7 @@ DEVICE_SCHEMA = vol.Schema(
         ),
         vol.Required(CONF_ON_VALUE, default="on"): selector.TextSelector(),
         vol.Optional(CONF_OFF_VALUE): selector.TextSelector(),
+        vol.Optional(CONF_READY_BY): selector.TimeSelector(),
         vol.Optional(CONF_DURATION): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0.25, max=24, step=0.25, unit_of_measurement="h",
@@ -99,6 +101,8 @@ def _clean_device(user_input: dict[str, Any], dev_id: str | None = None) -> dict
         device[CONF_OFF_VALUE] = str(user_input[CONF_OFF_VALUE]).strip()
     if user_input.get(CONF_DURATION):
         device[CONF_DURATION] = float(user_input[CONF_DURATION])
+    if user_input.get(CONF_READY_BY):
+        device[CONF_READY_BY] = str(user_input[CONF_READY_BY])
     return device
 
 
@@ -171,6 +175,8 @@ class CheapestHourOptionsFlow(OptionsFlow):
             parts = [d[CONF_ENTITY_ID], f"→ {d[CONF_ON_VALUE]}"]
             if d.get(CONF_DURATION):
                 parts.append(f"{d[CONF_DURATION]:g} h")
+            if d.get(CONF_READY_BY):
+                parts.append(f"klaar om {str(d[CONF_READY_BY])[:5]}")
             if d.get(CONF_OFFSET):
                 parts.append(f"+{d[CONF_OFFSET]:g} min")
             labels.append(selector.SelectOptionDict(value=d[CONF_DEVICE_ID], label=" ".join(parts)))

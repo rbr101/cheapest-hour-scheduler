@@ -41,20 +41,22 @@
       },
       "add_device": {
         "title": "Apparaat toevoegen",
-        "description": "Het apparaat wordt bij de start van het goedkoopste blok (plus offset) geschakeld en na de looptijd teruggezet.",
+        "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset). Met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.",
         "data": {
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
           "duration_hours": "Looptijd (uren, optioneel)",
-          "start_offset_minutes": "Start-offset (minuten)"
+          "start_offset_minutes": "Start-offset (minuten)",
+          "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
           "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
           "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
-          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten."
+          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om').",
+          "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok."
         }
       },
       "edit_device": {
@@ -65,20 +67,22 @@
       },
       "edit_device_form": {
         "title": "Apparaat wijzigen",
-        "description": "Het apparaat wordt bij de start van het goedkoopste blok (plus offset) geschakeld en na de looptijd teruggezet.",
+        "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset). Met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.",
         "data": {
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
           "duration_hours": "Looptijd (uren, optioneel)",
-          "start_offset_minutes": "Start-offset (minuten)"
+          "start_offset_minutes": "Start-offset (minuten)",
+          "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
           "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
           "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
-          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten."
+          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om').",
+          "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok."
         }
       },
       "remove_device": {
@@ -102,6 +106,9 @@
       },
       "block_average_price": {
         "name": "Gemiddelde prijs blok"
+      },
+      "device_start": {
+        "name": "Start {entity}"
       }
     },
     "binary_sensor": {

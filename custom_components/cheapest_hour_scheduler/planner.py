@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, tzinfo
 from typing import Any, Iterable
 
 
@@ -76,10 +76,12 @@ def find_cheapest_block(
     hours: float,
     now: datetime,
     not_before: datetime | None = None,
+    deadline: datetime | None = None,
 ) -> Block | None:
     """Return the cheapest contiguous block of `hours` that has not ended yet.
 
     The block may start in the slot that is currently running, never earlier.
+    With `deadline` the block must end at or before that moment.
     Returns None when there is not enough (future) price data.
     """
     if not slots or hours <= 0:
@@ -91,6 +93,8 @@ def find_cheapest_block(
     earliest = now if not_before is None else max(now, not_before)
     # Allow the slot that is in progress right now.
     usable = [s for s in slots if s.end > earliest]
+    if deadline is not None:
+        usable = [s for s in usable if s.end <= deadline]
 
     best: Block | None = None
     for i in range(len(usable) - needed + 1):
@@ -103,3 +107,29 @@ def find_cheapest_block(
         if best is None or avg < best.average_price - 1e-9:
             best = Block(window[0].start, window[-1].end, avg, tuple(window))
     return best
+
+
+def next_occurrence(after: datetime, at: time, tz: tzinfo) -> datetime:
+    """First moment strictly after `after` where the local clock shows `at`."""
+    local = after.astimezone(tz)
+    candidate = datetime.combine(local.date(), at, tzinfo=tz)
+    if candidate <= local:
+        candidate = datetime.combine(local.date() + timedelta(days=1), at, tzinfo=tz)
+    return candidate
+
+
+def parse_time_of_day(value: object) -> time | None:
+    """Parse '07:00', '07:00:00' or a time object."""
+    if isinstance(value, time):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return time.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def covers(slots: list[PriceSlot], until: datetime) -> bool:
+    """Is there price data up to `until`?"""
+    return bool(slots) and slots[-1].end >= until
