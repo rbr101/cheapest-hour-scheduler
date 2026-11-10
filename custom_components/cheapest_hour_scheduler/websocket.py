@@ -20,13 +20,6 @@ def _iso(value) -> str | None:
     return dt_util.as_local(value).isoformat() if value else None
 
 
-def _friendly(hass: HomeAssistant, entity_id: str) -> str:
-    state = hass.states.get(entity_id)
-    if state and state.attributes.get("friendly_name"):
-        return state.attributes["friendly_name"]
-    return entity_id
-
-
 def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
     """Everything the card needs for one config entry."""
     now = dt_util.utcnow()
@@ -37,7 +30,8 @@ def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
         item: dict[str, Any] = {
             "id": dev_id,
             "entity_id": device[CONF_ENTITY_ID],
-            "name": _friendly(hass, device[CONF_ENTITY_ID]),
+            "name": scheduler.name_of(device),
+            "enabled": scheduler.is_record_enabled(dev_id),
             "ready_by": device.get(CONF_READY_BY),
             "waiting": scheduler.waiting.get(dev_id),
             "plan": None,

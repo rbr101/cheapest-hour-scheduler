@@ -43,6 +43,7 @@
         "title": "Add device",
         "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
         "data": {
+          "name": "Description",
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
@@ -51,6 +52,7 @@
           "ready_by": "Ready by (optional)"
         },
         "data_description": {
+          "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
           "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
@@ -69,6 +71,7 @@
         "title": "Edit device",
         "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
         "data": {
+          "name": "Description",
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
@@ -77,6 +80,7 @@
           "ready_by": "Ready by (optional)"
         },
         "data_description": {
+          "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
           "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
@@ -107,18 +111,27 @@
       "block_average_price": {
         "name": "Block average price"
       },
-      "device_start": {
-        "name": "Start {entity}"
+      "record_start": {
+        "name": "Start"
+      },
+      "record_end": {
+        "name": "End"
       }
     },
     "binary_sensor": {
       "block_active": {
         "name": "Cheapest block active"
+      },
+      "record_active": {
+        "name": "Active"
       }
     },
     "switch": {
       "enabled": {
         "name": "Scheduler enabled"
+      },
+      "record_enabled": {
+        "name": "Enabled"
       }
     },
     "button": {

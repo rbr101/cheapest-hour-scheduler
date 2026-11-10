@@ -7,7 +7,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN, SIGNAL_UPDATE
+from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, DOMAIN, SIGNAL_UPDATE
 from .scheduler import CheapestHourScheduler
 
 
@@ -44,3 +44,27 @@ class SchedulerEntity(Entity):
     @callback
     def _handle_update(self) -> None:
         self.async_write_ha_state()
+
+
+def record_device_identifier(entry_id: str, dev_id: str) -> tuple[str, str]:
+    return (DOMAIN, f"{entry_id}_{dev_id}")
+
+
+class RecordEntity(SchedulerEntity):
+    """Entity of one device record, on its own device under the scheduler."""
+
+    def __init__(
+        self, scheduler: CheapestHourScheduler, device: dict, key: str, unique_suffix: str
+    ) -> None:
+        super().__init__(scheduler, key, unique_suffix)
+        entry = scheduler.entry
+        self._dev_id = device[CONF_DEVICE_ID]
+        self._record = device
+        self._attr_device_info = DeviceInfo(
+            identifiers={record_device_identifier(entry.entry_id, self._dev_id)},
+            name=scheduler.name_of(device),
+            manufacturer="rbr101",
+            model=f"Cheapest Hour Scheduler record ({device[CONF_ENTITY_ID]})",
+            entry_type=DeviceEntryType.SERVICE,
+            via_device=(DOMAIN, entry.entry_id),
+        )

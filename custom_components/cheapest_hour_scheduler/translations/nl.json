@@ -43,6 +43,7 @@
         "title": "Apparaat toevoegen",
         "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset). Met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.",
         "data": {
+          "name": "Beschrijving",
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
@@ -51,6 +52,7 @@
           "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
+          "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
           "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
@@ -69,6 +71,7 @@
         "title": "Apparaat wijzigen",
         "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset). Met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.",
         "data": {
+          "name": "Beschrijving",
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
@@ -77,6 +80,7 @@
           "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
+          "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
           "entity_id": "switch, number, select, button, script, …",
           "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
           "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
@@ -107,18 +111,27 @@
       "block_average_price": {
         "name": "Gemiddelde prijs blok"
       },
-      "device_start": {
-        "name": "Start {entity}"
+      "record_start": {
+        "name": "Start"
+      },
+      "record_end": {
+        "name": "Einde"
       }
     },
     "binary_sensor": {
       "block_active": {
         "name": "Goedkoopste blok actief"
+      },
+      "record_active": {
+        "name": "Actief"
       }
     },
     "switch": {
       "enabled": {
         "name": "Planner actief"
+      },
+      "record_enabled": {
+        "name": "Ingeschakeld"
       }
     },
     "button": {

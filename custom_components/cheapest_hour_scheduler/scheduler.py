@@ -33,6 +33,7 @@ from .const import (
     ATTR_PRICES_TOMORROW,
     AUTO_VALUE,
     CONF_BLOCK_HOURS,
+    CONF_DESCRIPTION,
     CONF_DEVICE_ID,
     CONF_DEVICES,
     CONF_DURATION,
@@ -161,6 +162,16 @@ def _is_relative_value(value: Any) -> bool:
     return text == AUTO_VALUE or SECONDS_PLACEHOLDER in text
 
 
+def record_name(hass: HomeAssistant, device: dict[str, Any]) -> str:
+    """Description of a record, falling back to the entity's friendly name."""
+    if str(device.get(CONF_DESCRIPTION) or "").strip():
+        return str(device[CONF_DESCRIPTION]).strip()
+    state = hass.states.get(device[CONF_ENTITY_ID])
+    if state and state.attributes.get("friendly_name"):
+        return state.attributes["friendly_name"]
+    return device[CONF_ENTITY_ID].split(".", 1)[-1].replace("_", " ").capitalize()
+
+
 def _hours(device: dict[str, Any], default: float) -> float:
     try:
         return float(device.get(CONF_DURATION) or default)
@@ -189,6 +200,7 @@ class CheapestHourScheduler:
         self._price_cache: dict[datetime, PriceSlot] = {}
         self.price_source: str = "none"  # "sensor", "cache" or "none"
         self._last_block_start: datetime | None = None  # last finished shared block
+        self.record_enabled: dict[str, bool] = {}  # dev_id -> on/off (default on)
         self.last_planned: datetime | None = None
         self.last_error: str | None = None
 
@@ -230,6 +242,9 @@ class CheapestHourScheduler:
         except (KeyError, TypeError, ValueError):
             pass
 
+        self.record_enabled = {
+            k: bool(v) for k, v in (stored.get("record_enabled") or {}).items()
+        }
         if stored.get("last_block_start"):
             self._last_block_start = dt_util.parse_datetime(stored["last_block_start"])
 
@@ -260,6 +275,7 @@ class CheapestHourScheduler:
                 for slot in sorted(self._price_cache.values(), key=lambda sl: sl.start)
             ],
         }
+        data["record_enabled"] = self.record_enabled
         if self._last_block_start:
             data["last_block_start"] = self._last_block_start.isoformat()
         if self.block:
@@ -287,6 +303,17 @@ class CheapestHourScheduler:
         if not enabled:
             self._cancel_device_timers()
         await self.async_plan()
+
+    def is_record_enabled(self, dev_id: str) -> bool:
+        return self.record_enabled.get(dev_id, True)
+
+    async def async_set_record_enabled(self, dev_id: str, enabled: bool) -> None:
+        """Turn one record on/off. Turning it off while it runs switches it back."""
+        self.record_enabled[dev_id] = enabled
+        await self.async_plan()
+
+    def name_of(self, device: dict[str, Any]) -> str:
+        return record_name(self.hass, device)
 
     # --------------------------------------------------------------- planning
 
@@ -439,6 +466,13 @@ class CheapestHourScheduler:
                 dev_id = device[CONF_DEVICE_ID]
                 prev = self.device_plans.get(dev_id)
 
+                if not self.is_record_enabled(dev_id):
+                    if prev:
+                        if prev.started and not prev.stopped and prev.end and self.enabled:
+                            await self._run_stop(prev)  # switched off while running
+                        prev.cancel()
+                    self.waiting[dev_id] = "disabled"
+                    continue
                 if prev and prev.locked(now):
                     new_plans[dev_id] = prev
                     continue

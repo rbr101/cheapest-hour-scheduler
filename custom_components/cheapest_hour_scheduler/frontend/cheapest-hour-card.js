@@ -38,6 +38,7 @@ const NL = {
   done: "klaar",
   planned: "gepland",
   now: "nu",
+  off: "uitgeschakeld",
 };
 const EN = {
   noData: "No price data",
@@ -51,6 +52,7 @@ const EN = {
   done: "done",
   planned: "planned",
   now: "now",
+  off: "disabled",
 };
 
 class CheapestHourCard extends HTMLElement {
@@ -229,9 +231,12 @@ class CheapestHourCard extends HTMLElement {
       const ry = rowsTop + i * ROW_H;
       const name = d.name.length > 18 ? d.name.slice(0, 17) + "…" : d.name;
       svg += `<line class="rowline" x1="0" x2="${LABEL_W + plotW}" y1="${ry + ROW_H}" y2="${ry + ROW_H}"/>`;
-      svg += `<text class="label" x="0" y="${ry + ROW_H / 2 + 4}"><title>${esc(d.entity_id)}</title>${esc(name)}</text>`;
+      const off = d.enabled === false;
+      svg += `<text class="label${off ? " off" : ""}" x="0" y="${ry + ROW_H / 2 + 4}"><title>${esc(d.name)}\n${esc(d.entity_id)}</title>${esc(name)}</text>`;
       const p = d.plan;
-      if (p) {
+      if (off) {
+        svg += `<text class="axis muted" x="${LABEL_W + 4}" y="${ry + ROW_H / 2 + 4}">${L.off}</text>`;
+      } else if (p) {
         const ps = t(p.start);
         const pe = t(p.end);
         const state = p.running ? "running" : pe <= now || p.stopped ? "done" : "planned";
@@ -310,6 +315,7 @@ class CheapestHourCard extends HTMLElement {
       .axis.date { font-weight: 500; }
       .muted { font-style: italic; }
       .label { font-size: 12px; fill: var(--primary-text-color); }
+      .label.off { fill: var(--disabled-text-color, #9e9e9e); text-decoration: line-through; }
       .bar.planned { fill: var(--primary-color); }
       .bar.running { fill: var(--success-color, #43a047); }
       .bar.done { fill: var(--disabled-text-color, #9e9e9e); opacity: .7; }

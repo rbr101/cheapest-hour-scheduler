@@ -43,6 +43,7 @@ Open the integration → **Configure** → *Add device*. Each record:
 
 | Field | Example | Meaning |
 |---|---|---|
+| Description | `Thuisaccu` | Optional. Shown everywhere (device, entities, card, attributes) instead of the entity name. |
 | Entity | `switch.battery_charger` | What to control |
 | Value at start | `on` | Value set at block start (+ offset) |
 | Value at end | `off` | Optional. Set after the run time. Empty = do nothing. |
@@ -96,10 +97,20 @@ As soon as a block is planned the integration writes the seconds from *now* unti
 | `sensor.<name>_block_start` | Start of the planned block (attribute `planned_actions` lists every device action) |
 | `sensor.<name>_block_end` | End of the planned block |
 | `sensor.<name>_block_average_price` | Average price of the block, with per-slot prices as attributes |
-| `sensor.<name>_start_<entity>` | Planned start per device record, with end, finished-at, ready-by and average price as attributes |
 | `binary_sensor.<name>_cheapest_block_active` | On during the block — handy for your own automations |
 | `switch.<name>_scheduler_enabled` | Master switch; off = no device actions |
 | `button.<name>_recalculate` | Force a recalculation |
+
+Every device record also gets **its own device** (listed under the scheduler in *Settings → Devices*), named after its description:
+
+| Entity | Description |
+|---|---|
+| `switch.<description>_enabled` | Turn this record on/off. Off = not planned or switched; turning it off while it runs applies the *value at end* right away. |
+| `sensor.<description>_start` | Planned start, with end, ready-by, average price and status as attributes |
+| `sensor.<description>_end` | When the run is expected to be finished |
+| `binary_sensor.<description>_active` | On while this record's run is in progress |
+
+Removing a record in the options also removes its device.
 
 ## Lovelace card
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Description** per device record, shown everywhere instead of the entity name
+  (devices, entities, card, attributes, options lists).
+- Each device record is now **its own device** under the scheduler, with:
+  - `switch.<description>_enabled` to turn the record on/off (stored across restarts;
+    turning it off while running switches the device back right away),
+  - `sensor.<description>_start` and `sensor.<description>_end`,
+  - `binary_sensor.<description>_active`.
+- Devices of deleted records are removed automatically.
+- Card shows disabled records struck through.
+
+### Changed
+- The per-record start sensor moved to the record's device and is now called
+  "Start" (entity id based on the description). Without a description and friendly
+  name, the entity's object id is used ("Boiler" instead of "input_boolean.boiler").
+
 ## [0.2.2] - 2026-11-10
 
 ### Added

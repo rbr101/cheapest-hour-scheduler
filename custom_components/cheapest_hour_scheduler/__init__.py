@@ -8,11 +8,12 @@ from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket
-from .const import DOMAIN, PLATFORMS
+from .const import CONF_DEVICE_ID, DOMAIN, PLATFORMS
+from .entity import record_device_identifier
 from .scheduler import CheapestHourScheduler
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,12 +55,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up from a config entry."""
     scheduler = CheapestHourScheduler(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = scheduler
+    _remove_stale_record_devices(hass, entry, scheduler)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await scheduler.async_start()
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
+
+
+def _remove_stale_record_devices(
+    hass: HomeAssistant, entry: ConfigEntry, scheduler: CheapestHourScheduler
+) -> None:
+    """Remove devices of records that were deleted in the options."""
+    registry = dr.async_get(hass)
+    keep = {(DOMAIN, entry.entry_id)} | {
+        record_device_identifier(entry.entry_id, d[CONF_DEVICE_ID]) for d in scheduler.devices
+    }
+    for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+        if not device.identifiers & keep:
+            registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

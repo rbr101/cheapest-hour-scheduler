@@ -159,9 +159,9 @@ async def test_ready_by_gets_own_window(hass):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    boiler = hass.states.get("sensor.test_start_boiler")
+    boiler = hass.states.get("sensor.boiler_start")
     assert dt_util.parse_datetime(boiler.state) == slot0 + timedelta(hours=3)
-    battery = hass.states.get("sensor.test_start_battery")
+    battery = hass.states.get("sensor.battery_start")
     assert dt_util.parse_datetime(battery.state) == slot0 + timedelta(hours=20)
     assert tz is not None
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -240,3 +240,63 @@ async def test_websocket_plan(hass, hass_ws_client):
     await client.send_json({"id": 2, "type": f"{DOMAIN}/plan", "entity_id": "sensor.price"})
     msg = await client.receive_json()
     assert not msg["success"]
+
+
+async def test_record_description_device_and_switch(hass, freezer):
+    from homeassistant.helpers import device_registry as dr
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    values = [0.6] * 8 + [0.2] * 4 + [0.6] * 20
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [{"id": "a", "name": "Thuisaccu", "entity_id": "input_boolean.charger",
+                              "on_value": "on", "off_value": "off"}]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Own device under the scheduler device, named after the description
+    registry = dr.async_get(hass)
+    record_dev = registry.async_get_device(identifiers={(DOMAIN, f"{entry.entry_id}_a")})
+    parent = registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert record_dev.name == "Thuisaccu"
+    assert record_dev.via_device_id == parent.id
+
+    start = hass.states.get("sensor.thuisaccu_start")
+    assert start.attributes["name"] == "Thuisaccu"
+    assert hass.states.get("sensor.thuisaccu_end") is not None
+    assert hass.states.get("switch.thuisaccu_enabled").state == "on"
+    assert hass.states.get("binary_sensor.thuisaccu_active").state == "off"
+
+    # Running...
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.charger").state == "on"
+    assert hass.states.get("binary_sensor.thuisaccu_active").state == "on"
+
+    # ...switch the record off: device goes off and no plan remains
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.thuisaccu_enabled"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.charger").state == "off"
+    assert hass.states.get("sensor.thuisaccu_start").state == "unknown"
+    assert hass.states.get("sensor.thuisaccu_start").attributes["waiting"] == "disabled"
+
+    # On again during the block: starts again
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.thuisaccu_enabled"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.charger").state == "on"
+
+    # Removing the record removes its device
+    hass.config_entries.async_update_entry(entry, options={"devices": []})
+    await hass.async_block_till_done()
+    assert registry.async_get_device(identifiers={(DOMAIN, f"{entry.entry_id}_a")}) is None
+    assert await hass.config_entries.async_unload(entry.entry_id)

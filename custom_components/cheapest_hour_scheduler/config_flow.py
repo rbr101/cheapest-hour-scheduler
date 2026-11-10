@@ -15,6 +15,7 @@ from homeassistant.helpers import selector
 from .const import (
     AUTO_VALUE,
     CONF_BLOCK_HOURS,
+    CONF_DESCRIPTION,
     CONF_DEVICE_ID,
     CONF_DEVICES,
     CONF_DURATION,
@@ -68,6 +69,7 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
 
 DEVICE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_DESCRIPTION): selector.TextSelector(),
         vol.Required(CONF_ENTITY_ID): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=DEVICE_DOMAINS)
         ),
@@ -103,6 +105,8 @@ def _clean_device(user_input: dict[str, Any], dev_id: str | None = None) -> dict
         device[CONF_DURATION] = float(user_input[CONF_DURATION])
     if user_input.get(CONF_READY_BY):
         device[CONF_READY_BY] = str(user_input[CONF_READY_BY])
+    if str(user_input.get(CONF_DESCRIPTION) or "").strip():
+        device[CONF_DESCRIPTION] = str(user_input[CONF_DESCRIPTION]).strip()
     return device
 
 
@@ -172,7 +176,8 @@ class CheapestHourOptionsFlow(OptionsFlow):
     def _device_labels(self) -> list[selector.SelectOptionDict]:
         labels = []
         for d in self._get_devices():
-            parts = [d[CONF_ENTITY_ID], f"→ {d[CONF_ON_VALUE]}"]
+            parts = [d[CONF_DESCRIPTION]] if d.get(CONF_DESCRIPTION) else []
+            parts += [f"({d[CONF_ENTITY_ID]})" if parts else d[CONF_ENTITY_ID], f"→ {d[CONF_ON_VALUE]}"]
             if d.get(CONF_DURATION):
                 parts.append(f"{d[CONF_DURATION]:g} h")
             if d.get(CONF_READY_BY):

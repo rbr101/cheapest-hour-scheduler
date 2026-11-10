@@ -14,6 +14,7 @@ CONF_OFF_VALUE = "off_value"
 CONF_DURATION = "duration_hours"
 CONF_OFFSET = "start_offset_minutes"
 CONF_READY_BY = "ready_by"
+CONF_DESCRIPTION = "name"  # description shown instead of the entity name
 
 DEFAULT_PRICE_SENSOR = "sensor.zonneplan_current_tariff_rounded"
 DEFAULT_BLOCK_HOURS = 3.0

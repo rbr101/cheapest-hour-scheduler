@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, CONF_ON_VALUE, CONF_READY_BY, DOMAIN
-from .entity import SchedulerEntity
+from .entity import RecordEntity, SchedulerEntity
 from .scheduler import CheapestHourScheduler
 
 
@@ -26,7 +26,8 @@ async def async_setup_entry(
             BlockEndSensor(scheduler, "block_end"),
             BlockPriceSensor(scheduler, "block_average_price"),
         ]
-        + [DeviceStartSensor(scheduler, device) for device in scheduler.devices]
+        + [RecordStartSensor(scheduler, device) for device in scheduler.devices]
+        + [RecordEndSensor(scheduler, device) for device in scheduler.devices]
     )
 
 
@@ -52,18 +53,19 @@ class BlockStartSensor(SchedulerEntity, SensorEntity):
             "prices_known_until": (
                 dt_util.as_local(s.prices_known_until).isoformat() if s.prices_known_until else None
             ),
-            "planned_actions": [_plan_attrs(p) for p in s.device_plans.values()],
+            "planned_actions": [_plan_attrs(p, s.name_of(p.device)) for p in s.device_plans.values()],
             "waiting": {
-                d[CONF_ENTITY_ID]: s.waiting[d[CONF_DEVICE_ID]]
+                s.name_of(d): s.waiting[d[CONF_DEVICE_ID]]
                 for d in s.devices
                 if d[CONF_DEVICE_ID] in s.waiting
             },
         }
 
 
-def _plan_attrs(p) -> dict[str, Any]:
+def _plan_attrs(p, name: str) -> dict[str, Any]:
     local = dt_util.as_local
     return {
+        "name": name,
         "entity_id": p.device[CONF_ENTITY_ID],
         "value": p.armed_value or p.device.get(CONF_ON_VALUE),
         "start": local(p.start).isoformat(),
@@ -76,18 +78,14 @@ def _plan_attrs(p) -> dict[str, Any]:
     }
 
 
-class DeviceStartSensor(SchedulerEntity, SensorEntity):
+class RecordStartSensor(RecordEntity, SensorEntity):
     """Planned start of one device record."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:timer-play-outline"
 
     def __init__(self, scheduler: CheapestHourScheduler, device: dict[str, Any]) -> None:
-        super().__init__(scheduler, "device_start", f"device_{device[CONF_DEVICE_ID]}")
-        self._dev_id = device[CONF_DEVICE_ID]
-        self._entity_id = device[CONF_ENTITY_ID]
-        self._ready_by = device.get(CONF_READY_BY)
-        self._attr_translation_placeholders = {"entity": self._entity_id.split(".", 1)[1]}
+        super().__init__(scheduler, device, "record_start", f"device_{device[CONF_DEVICE_ID]}")
 
     @property
     def native_value(self) -> datetime | None:
@@ -96,13 +94,34 @@ class DeviceStartSensor(SchedulerEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        plan = self.scheduler.device_plans.get(self._dev_id)
-        attrs: dict[str, Any] = {"entity_id": self._entity_id, "ready_by_time": self._ready_by}
+        s = self.scheduler
+        plan = s.device_plans.get(self._dev_id)
+        attrs: dict[str, Any] = {
+            "name": s.name_of(self._record),
+            "entity_id": self._record[CONF_ENTITY_ID],
+            "ready_by_time": self._record.get(CONF_READY_BY),
+            "record_enabled": s.is_record_enabled(self._dev_id),
+        }
         if plan:
-            attrs.update(_plan_attrs(plan))
-        if self._dev_id in self.scheduler.waiting:
-            attrs["waiting"] = self.scheduler.waiting[self._dev_id]
+            attrs.update(_plan_attrs(plan, s.name_of(self._record)))
+        if self._dev_id in s.waiting:
+            attrs["waiting"] = s.waiting[self._dev_id]
         return attrs
+
+
+class RecordEndSensor(RecordEntity, SensorEntity):
+    """When the device record is expected to be finished."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:timer-stop-outline"
+
+    def __init__(self, scheduler: CheapestHourScheduler, device: dict[str, Any]) -> None:
+        super().__init__(scheduler, device, "record_end", f"device_{device[CONF_DEVICE_ID]}_end")
+
+    @property
+    def native_value(self) -> datetime | None:
+        plan = self.scheduler.device_plans.get(self._dev_id)
+        return plan.run_end if plan else None
 
 
 class BlockEndSensor(SchedulerEntity, SensorEntity):
