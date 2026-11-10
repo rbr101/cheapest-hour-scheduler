@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Cheapest Hour Scheduler",
+        "description": "Choose the price sensor (with prices_today / prices_tomorrow attributes) and how many consecutive hours the cheapest block should be.",
+        "data": {
+          "name": "Name",
+          "price_sensor": "Price sensor",
+          "block_hours": "Block length (hours)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor with prices_today and prices_tomorrow attributes, e.g. sensor.zonneplan_current_tariff_rounded",
+          "block_hours": "Length of the cheapest consecutive block. Quarters are allowed (e.g. 2.5)."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cheapest Hour Scheduler",
+        "menu_options": {
+          "settings": "Settings (price sensor, block length)",
+          "add_device": "Add device",
+          "edit_device": "Edit device",
+          "remove_device": "Remove device",
+          "finish": "Close"
+        }
+      },
+      "settings": {
+        "title": "Settings (price sensor, block length)",
+        "data": {
+          "price_sensor": "Price sensor",
+          "block_hours": "Block length (hours)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor with prices_today and prices_tomorrow attributes, e.g. sensor.zonneplan_current_tariff_rounded",
+          "block_hours": "Length of the cheapest consecutive block. Quarters are allowed (e.g. 2.5)."
+        }
+      },
+      "add_device": {
+        "title": "Add device",
+        "description": "The device is switched at the start of the cheapest block (plus offset) and switched back after the run time.",
+        "data": {
+          "entity_id": "Entity",
+          "on_value": "Value at start",
+          "off_value": "Value at end (optional)",
+          "duration_hours": "Run time (hours, optional)",
+          "start_offset_minutes": "Start offset (minutes)"
+        },
+        "data_description": {
+          "entity_id": "switch, number, select, button, script, …",
+          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
+          "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
+          "duration_hours": "How long it must stay on. Empty = until the end of the block.",
+          "start_offset_minutes": "Start this many minutes after the block starts."
+        }
+      },
+      "edit_device": {
+        "title": "Edit device",
+        "data": {
+          "id": "Device"
+        }
+      },
+      "edit_device_form": {
+        "title": "Edit device",
+        "description": "The device is switched at the start of the cheapest block (plus offset) and switched back after the run time.",
+        "data": {
+          "entity_id": "Entity",
+          "on_value": "Value at start",
+          "off_value": "Value at end (optional)",
+          "duration_hours": "Run time (hours, optional)",
+          "start_offset_minutes": "Start offset (minutes)"
+        },
+        "data_description": {
+          "entity_id": "switch, number, select, button, script, …",
+          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
+          "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
+          "duration_hours": "How long it must stay on. Empty = until the end of the block.",
+          "start_offset_minutes": "Start this many minutes after the block starts."
+        }
+      },
+      "remove_device": {
+        "title": "Remove device",
+        "data": {
+          "devices": "Devices to remove"
+        }
+      }
+    },
+    "error": {
+      "not_a_number": "Enter a number, or 'auto' for seconds until start."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "block_start": {
+        "name": "Block start"
+      },
+      "block_end": {
+        "name": "Block end"
+      },
+      "block_average_price": {
+        "name": "Block average price"
+      }
+    },
+    "binary_sensor": {
+      "block_active": {
+        "name": "Cheapest block active"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Scheduler enabled"
+      }
+    },
+    "button": {
+      "replan": {
+        "name": "Recalculate"
+      }
+    }
+  }
+}

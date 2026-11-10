@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Cheapest Hour Scheduler",
+        "description": "Kies de prijssensor (met prices_today / prices_tomorrow attributen) en uit hoeveel aaneengesloten uren het goedkoopste blok moet bestaan.",
+        "data": {
+          "name": "Naam",
+          "price_sensor": "Prijssensor",
+          "block_hours": "Bloklengte (uren)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor met prices_today en prices_tomorrow attributen, bv. sensor.zonneplan_current_tariff_rounded",
+          "block_hours": "Lengte van het goedkoopste aaneengesloten blok. Kwartieren mogen (bv. 2,5)."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cheapest Hour Scheduler",
+        "menu_options": {
+          "settings": "Instellingen (prijssensor, bloklengte)",
+          "add_device": "Apparaat toevoegen",
+          "edit_device": "Apparaat wijzigen",
+          "remove_device": "Apparaat verwijderen",
+          "finish": "Sluiten"
+        }
+      },
+      "settings": {
+        "title": "Instellingen (prijssensor, bloklengte)",
+        "data": {
+          "price_sensor": "Prijssensor",
+          "block_hours": "Bloklengte (uren)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor met prices_today en prices_tomorrow attributen, bv. sensor.zonneplan_current_tariff_rounded",
+          "block_hours": "Lengte van het goedkoopste aaneengesloten blok. Kwartieren mogen (bv. 2,5)."
+        }
+      },
+      "add_device": {
+        "title": "Apparaat toevoegen",
+        "description": "Het apparaat wordt bij de start van het goedkoopste blok (plus offset) geschakeld en na de looptijd teruggezet.",
+        "data": {
+          "entity_id": "Entiteit",
+          "on_value": "Waarde bij start",
+          "off_value": "Waarde aan het eind (optioneel)",
+          "duration_hours": "Looptijd (uren, optioneel)",
+          "start_offset_minutes": "Start-offset (minuten)"
+        },
+        "data_description": {
+          "entity_id": "switch, number, select, button, script, …",
+          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
+          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+          "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
+          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten."
+        }
+      },
+      "edit_device": {
+        "title": "Apparaat wijzigen",
+        "data": {
+          "id": "Apparaat"
+        }
+      },
+      "edit_device_form": {
+        "title": "Apparaat wijzigen",
+        "description": "Het apparaat wordt bij de start van het goedkoopste blok (plus offset) geschakeld en na de looptijd teruggezet.",
+        "data": {
+          "entity_id": "Entiteit",
+          "on_value": "Waarde bij start",
+          "off_value": "Waarde aan het eind (optioneel)",
+          "duration_hours": "Looptijd (uren, optioneel)",
+          "start_offset_minutes": "Start-offset (minuten)"
+        },
+        "data_description": {
+          "entity_id": "switch, number, select, button, script, …",
+          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
+          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+          "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
+          "start_offset_minutes": "Zoveel minuten na het begin van het blok starten."
+        }
+      },
+      "remove_device": {
+        "title": "Apparaat verwijderen",
+        "data": {
+          "devices": "Te verwijderen apparaten"
+        }
+      }
+    },
+    "error": {
+      "not_a_number": "Vul een getal in, of 'auto' voor seconden tot de start."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "block_start": {
+        "name": "Start blok"
+      },
+      "block_end": {
+        "name": "Einde blok"
+      },
+      "block_average_price": {
+        "name": "Gemiddelde prijs blok"
+      }
+    },
+    "binary_sensor": {
+      "block_active": {
+        "name": "Goedkoopste blok actief"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Planner actief"
+      }
+    },
+    "button": {
+      "replan": {
+        "name": "Herberekenen"
+      }
+    }
+  }
+}
