@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.2] - 2026-11-10
+
+### Added
+- MIT license.
+
+### Changed
+- CI: HACS validation now also checks the brand icon (no checks ignored), as required
+  for inclusion in the HACS default store.
+
 ## [0.6.1] - 2026-11-10
 
 ### Added

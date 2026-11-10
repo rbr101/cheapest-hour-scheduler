@@ -146,3 +146,7 @@ pip install pytest pyyaml                      # planner tests only
 pip install pytest-homeassistant-custom-component  # full Home Assistant tests
 pytest
 ```
+
+## License
+
+[MIT](LICENSE)
