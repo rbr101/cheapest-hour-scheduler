@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] - 2026-11-10
 
 ### Added
 - **Description** per device record, shown everywhere instead of the entity name
