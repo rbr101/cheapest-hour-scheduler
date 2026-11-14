@@ -20,9 +20,24 @@ prices_tomorrow:
 
 ## Installation
 
-### HACS (custom repository)
+### Marketplace (Home Assistant 2026.11 and newer)
+HACS is built into Home Assistant as the **Marketplace** since 2026.11.
+
+1. Go to **Settings → Marketplace**. The first time, accept the risk notice; until you do, you can browse but not install.
+2. Select **Add from link** and enter `https://github.com/rbr101/cheapest-hour-scheduler`. Adding a repository by link needs a GitHub connection: Home Assistant shows a code that you enter on GitHub.
+3. Open **Cheapest Hour Scheduler** and select **Install** (twice: on the page and in the dialog).
+4. Restart Home Assistant when **Settings → System → Repairs** asks for it, and refresh your browser once so the card loads.
+
+Updates show up in the Marketplace when a new release is published. After an update, restart Home Assistant (Repairs shows a "Restart required" entry).
+
+<details>
+<summary>Older Home Assistant (before 2026.11) with HACS</summary>
+
 1. HACS → ⋮ → *Custom repositories* → add `https://github.com/rbr101/cheapest-hour-scheduler`, type **Integration**.
 2. Install **Cheapest Hour Scheduler** and restart Home Assistant.
+
+When you upgrade to 2026.11, HACS moves to the Marketplace automatically and keeps this integration and its updates.
+</details>
 
 ### Manual
 Copy `custom_components/cheapest_hour_scheduler` to `<config>/custom_components/` and restart.
@@ -118,7 +133,7 @@ Removing a record in the options also removes its device.
 
 ## Lovelace card
 
-The integration ships its own card; it is loaded automatically (no resource to add, no separate HACS plugin). After installing/updating, refresh the browser once.
+The integration ships its own card; it is loaded automatically (no dashboard resource to add, no separate card to install from the Marketplace). After installing/updating, refresh the browser once.
 
 ```yaml
 type: custom:cheapest-hour-card

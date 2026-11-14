@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- README: installation via the **Marketplace** (Settings → Marketplace → Add from link),
+  which replaces HACS since Home Assistant 2026.11. HACS steps kept for older versions.
+
 ## [0.6.3] - 2026-11-14
 
 ### Added
