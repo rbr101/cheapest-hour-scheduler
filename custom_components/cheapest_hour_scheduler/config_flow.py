@@ -155,14 +155,16 @@ async def async_example_action_data(hass: HomeAssistant, action: str) -> str:
     return "\n".join(lines) if (example or missing) else ""
 
 
-def _target_schema(hass: HomeAssistant) -> vol.Schema:
-    """Step 1 of a record: what to control (entity and/or action)."""
+def _record_schema(hass: HomeAssistant) -> vol.Schema:
+    """One form with all fields of a device record (as before 0.7)."""
     return vol.Schema(
         {
             vol.Optional(CONF_DESCRIPTION): selector.TextSelector(),
             vol.Optional(CONF_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=DEVICE_DOMAINS)
             ),
+            vol.Optional(CONF_ON_VALUE, default="on"): selector.TextSelector(),
+            vol.Optional(CONF_OFF_VALUE): selector.TextSelector(),
             vol.Optional(CONF_ACTION): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_service_options(hass),
@@ -170,83 +172,68 @@ def _target_schema(hass: HomeAssistant) -> vol.Schema:
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
+            vol.Optional(CONF_ACTION_DATA): selector.TextSelector(
+                selector.TextSelectorConfig(multiline=True)
+            ),
+            vol.Optional(CONF_READY_BY): selector.TimeSelector(),
+            vol.Optional(CONF_DURATION): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.25, max=24, step=0.25, unit_of_measurement="h",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(CONF_OFFSET, default=0): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=1440, step=15, unit_of_measurement="min",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
         }
     )
 
 
-def _details_schema(record: dict[str, Any]) -> vol.Schema:
-    """Step 2 of a record: values / action data and timing."""
-    fields: dict[Any, Any] = {}
-    if record.get(CONF_ACTION):
-        fields[vol.Optional(CONF_ACTION_DATA)] = selector.TextSelector(
-            selector.TextSelectorConfig(multiline=True)
-        )
-    else:
-        fields[vol.Optional(CONF_ON_VALUE, default="on")] = selector.TextSelector()
-    if record.get(CONF_ENTITY_ID):
-        fields[vol.Optional(CONF_OFF_VALUE)] = selector.TextSelector()
-    fields[vol.Optional(CONF_READY_BY)] = selector.TimeSelector()
-    fields[vol.Optional(CONF_DURATION)] = selector.NumberSelector(
-        selector.NumberSelectorConfig(
-            min=0.25, max=24, step=0.25, unit_of_measurement="h",
-            mode=selector.NumberSelectorMode.BOX,
-        )
-    )
-    fields[vol.Optional(CONF_OFFSET, default=0)] = selector.NumberSelector(
-        selector.NumberSelectorConfig(
-            min=0, max=1440, step=15, unit_of_measurement="min",
-            mode=selector.NumberSelectorMode.BOX,
-        )
-    )
-    return vol.Schema(fields)
-
-
-def _validate_target(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
+def _validate_record(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
     entity_id = str(user_input.get(CONF_ENTITY_ID) or "").strip()
     action = str(user_input.get(CONF_ACTION) or "").strip()
     if not entity_id and not action:
         return {"base": "entity_or_action"}
+
+    errors: dict[str, str] = {}
     if action:
         domain, _, service = action.partition(".")
         if not service or not hass.services.has_service(domain, service):
-            return {CONF_ACTION: "unknown_action"}
-    return {}
-
-
-def _validate_details(record: dict[str, Any], user_input: dict[str, Any]) -> dict[str, str]:
-    errors: dict[str, str] = {}
-    if record.get(CONF_ACTION):
+            errors[CONF_ACTION] = "unknown_action"
         try:
             render_action_data(user_input.get(CONF_ACTION_DATA))
         except HomeAssistantError:
             errors[CONF_ACTION_DATA] = "invalid_data"
-    elif str(record.get(CONF_ENTITY_ID, "")).split(".", 1)[0] in ("number", "input_number"):
+    elif entity_id.split(".", 1)[0] in ("number", "input_number"):
         value = str(user_input.get(CONF_ON_VALUE, "")).strip()
         if value.lower() != AUTO_VALUE and "{" not in value:
             try:
                 float(value)
             except ValueError:
                 errors[CONF_ON_VALUE] = "not_a_number"
+    if str(user_input.get(CONF_OFF_VALUE) or "").strip() and not entity_id:
+        errors[CONF_OFF_VALUE] = "off_needs_entity"
     return errors
 
 
-def _build_record(target: dict[str, Any], details: dict[str, Any], dev_id: str) -> dict[str, Any]:
+def _build_record(user_input: dict[str, Any], dev_id: str) -> dict[str, Any]:
     record: dict[str, Any] = {
         CONF_DEVICE_ID: dev_id,
-        CONF_ON_VALUE: str(details.get(CONF_ON_VALUE) or "on").strip(),
-        CONF_OFFSET: float(details.get(CONF_OFFSET) or 0),
+        CONF_ON_VALUE: str(user_input.get(CONF_ON_VALUE) or "on").strip(),
+        CONF_OFFSET: float(user_input.get(CONF_OFFSET) or 0),
     }
-    for key in (CONF_DESCRIPTION, CONF_ENTITY_ID, CONF_ACTION):
-        if str(target.get(key) or "").strip():
-            record[key] = str(target[key]).strip()
-    if record.get(CONF_ENTITY_ID) and str(details.get(CONF_OFF_VALUE) or "").strip():
-        record[CONF_OFF_VALUE] = str(details[CONF_OFF_VALUE]).strip()
-    if record.get(CONF_ACTION) and str(details.get(CONF_ACTION_DATA) or "").strip():
-        record[CONF_ACTION_DATA] = str(details[CONF_ACTION_DATA]).rstrip()
-    if details.get(CONF_DURATION):
-        record[CONF_DURATION] = float(details[CONF_DURATION])
-    if details.get(CONF_READY_BY):
-        record[CONF_READY_BY] = str(details[CONF_READY_BY])
+    for key in (CONF_DESCRIPTION, CONF_ENTITY_ID, CONF_OFF_VALUE, CONF_ACTION):
+        if str(user_input.get(key) or "").strip():
+            record[key] = str(user_input[key]).strip()
+    if record.get(CONF_ACTION) and str(user_input.get(CONF_ACTION_DATA) or "").strip():
+        record[CONF_ACTION_DATA] = str(user_input[CONF_ACTION_DATA]).rstrip()
+    if user_input.get(CONF_DURATION):
+        record[CONF_DURATION] = float(user_input[CONF_DURATION])
+    if user_input.get(CONF_READY_BY):
+        record[CONF_READY_BY] = str(user_input[CONF_READY_BY])
     return record
 
 
@@ -296,78 +283,67 @@ class CheapestHourOptionsFlow(OptionsFlow):
 
 
 class RecordSubentryFlow(ConfigSubentryFlow):
-    """Add (user) or edit (reconfigure, the settings icon) one device record."""
+    """Add (user) or edit (reconfigure, the settings icon) one device record.
+
+    One form with all fields. When an action is chosen and its data is left
+    empty, the form comes back once with the action's example data filled in.
+    """
 
     def __init__(self) -> None:
-        self._target: dict[str, Any] = {}
-        self._current: dict[str, Any] = {}
+        self._example_offered = False
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        return await self._async_step_target("user", user_input)
+        return await self._async_step_record("user", user_input, {})
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        if not self._current:
-            self._current = dict(self._get_reconfigure_subentry().data)
-        return await self._async_step_target("reconfigure", user_input)
+        current = dict(self._get_reconfigure_subentry().data)
+        return await self._async_step_record("reconfigure", user_input, current)
 
-    async def _async_step_target(
-        self, step_id: str, user_input: dict[str, Any] | None
+    async def _async_step_record(
+        self, step_id: str, user_input: dict[str, Any] | None, current: dict[str, Any]
     ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
+        suggested = dict(user_input or current)
         if user_input is not None:
-            errors = _validate_target(self.hass, user_input)
+            errors = _validate_record(self.hass, user_input)
+            action = str(user_input.get(CONF_ACTION) or "").strip()
+            wants_example = (
+                not errors
+                and action
+                and not str(user_input.get(CONF_ACTION_DATA) or "").strip()
+                and not self._example_offered
+            )
+            if wants_example:
+                example = await async_example_action_data(self.hass, action)
+                if example:
+                    # Show the same form again with the example data to check.
+                    self._example_offered = True
+                    suggested[CONF_ACTION_DATA] = example
+                    return self._show(step_id, suggested, errors)
             if not errors:
-                self._target = user_input
-                return await self.async_step_details()
+                return self._async_save(step_id, user_input)
+        return self._show(step_id, suggested, errors)
+
+    def _show(self, step_id: str, suggested: dict[str, Any], errors: dict[str, str]) -> SubentryFlowResult:
         return self.async_show_form(
             step_id=step_id,
-            data_schema=self.add_suggested_values_to_schema(
-                _target_schema(self.hass), user_input or self._current
-            ),
+            data_schema=self.add_suggested_values_to_schema(_record_schema(self.hass), suggested),
             errors=errors,
             description_placeholders=TEXT_PLACEHOLDERS,
         )
 
-    async def async_step_details(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        target = self._target
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            errors = _validate_details(target, user_input)
-            if not errors:
-                return self._async_save(user_input)
-
-        suggested = dict(user_input or self._current)
-        action = str(target.get(CONF_ACTION) or "").strip()
-        if user_input is None and action:
-            same_action = action == self._current.get(CONF_ACTION)
-            if not (same_action and self._current.get(CONF_ACTION_DATA)):
-                # New (or changed) action: start from the action's example data.
-                suggested[CONF_ACTION_DATA] = await async_example_action_data(self.hass, action)
-
-        return self.async_show_form(
-            step_id="details",
-            data_schema=self.add_suggested_values_to_schema(_details_schema(target), suggested),
-            errors=errors,
-            description_placeholders={
-                **TEXT_PLACEHOLDERS,
-                "target": record_name(self.hass, target),
-            },
-        )
-
-    def _async_save(self, details: dict[str, Any]) -> SubentryFlowResult:
-        if self.source == "reconfigure":
+    def _async_save(self, step_id: str, user_input: dict[str, Any]) -> SubentryFlowResult:
+        if step_id == "reconfigure":
             subentry = self._get_reconfigure_subentry()
             dev_id = subentry.data.get(CONF_DEVICE_ID) or subentry.unique_id or subentry.subentry_id
-            record = _build_record(self._target, details, dev_id)
+            record = _build_record(user_input, dev_id)
             return self.async_update_and_abort(
                 self._get_entry(), subentry, data=record, title=record_name(self.hass, record)
             )
         dev_id = uuid.uuid4().hex[:8]
-        record = _build_record(self._target, details, dev_id)
+        record = _build_record(user_input, dev_id)
         return self.async_create_entry(
             title=record_name(self.hass, record), data=record, unique_id=dev_id
         )

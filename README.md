@@ -61,10 +61,7 @@ Device records are managed on the integration page (*Settings → Devices & serv
 * **Add device** adds a record.
 * Every record has its own row with a **settings icon** (⚙️) to edit it, and a ⋮ menu to delete it.
 
-Adding or editing takes two steps:
-
-1. **What to switch**: description, entity and/or action.
-2. **Details**: the values (for an entity) or the action data (for an action), plus ready by, run time and offset. For an action, the data is pre-filled with the action's example data (see below).
+Adding or editing is one form with all fields. If you choose an action and leave its data empty, the form comes back once after *Submit* with the action's example data filled in (see below); check it and submit again.
 
 Each record:
 
@@ -104,7 +101,7 @@ How the value is applied depends on the entity domain:
 #### Action instead of an entity
 Some devices are started with a service call instead of an entity. Fill in **Action** and, if needed, **Action data** (YAML, the part you would put under `data:`). The entity and *value at start* are then not used.
 
-When you pick an action, the data field is **pre-filled with the action's example data**, the same as *Developer tools → Actions → Fill example data*: every field that has an example, also the ones in collapsed sections. Required fields without an example (such as `device_id`) are added as a commented line, e.g. `# device_id:`. Remove what you don't need and fill in the rest. When you edit a record and keep the same action, your own data is kept.
+When you choose an action and leave the data empty, the form comes back after *Submit* with the data field **filled with the action's example data**, the same as *Developer tools → Actions → Fill example data*: every field that has an example, also the ones in collapsed sections. Required fields without an example (such as `device_id`) are added as a commented line, e.g. `# device_id:`. Remove what you don't need and fill in the rest. Data you entered yourself is never overwritten. Submit again with the data still empty to call the action without data.
 
 In the data you can use:
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.1] - 2026-11-14
+
+### Fixed
+- The device form is **one screen again** with all fields (entity, value at start/end,
+  action, action data, ready by, run time, offset). In 0.7.0 it was split in two steps
+  and fields were hidden, so the on/off values, ready-by time and run time seemed gone.
+  Stored records were not changed; they show their values again.
+
+### Changed
+- Example data for an action: choose an action, leave the data empty and submit; the
+  form comes back once with the example data filled in. Your own data is never replaced.
+
 ## [0.7.0] - 2026-11-14
 
 ### Changed

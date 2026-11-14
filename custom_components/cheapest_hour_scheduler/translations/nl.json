@@ -42,47 +42,51 @@
       "step": {
         "user": {
           "title": "Apparaat toevoegen",
-          "description": "Wat moet er geschakeld worden: een entiteit, of een actie (service). Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok; met 'klaar om' krijgt het een eigen venster.",
+          "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset); met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.\n\nGebruik een entiteit (met een waarde bij start/eind) of een actie. Kies je een actie en laat je de data leeg, dan komt het formulier na Verzenden terug met de voorbeelddata van de actie ingevuld (zoals 'Vul voorbeelddata in' bij de ontwikkelhulpmiddelen): controleer die, haal weg wat je niet nodig hebt en verzend opnieuw.",
           "data": {
             "name": "Beschrijving",
             "entity_id": "Entiteit",
-            "action": "Actie (optioneel)"
-          },
-          "data_description": {
-            "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
-            "entity_id": "switch, number, select, button, script, … Leeg laten als je een actie gebruikt.",
-            "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program."
-          }
-        },
-        "reconfigure": {
-          "title": "Apparaat wijzigen",
-          "description": "Wat moet er geschakeld worden: een entiteit, of een actie (service). Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok; met 'klaar om' krijgt het een eigen venster.",
-          "data": {
-            "name": "Beschrijving",
-            "entity_id": "Entiteit",
-            "action": "Actie (optioneel)"
-          },
-          "data_description": {
-            "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
-            "entity_id": "switch, number, select, button, script, … Leeg laten als je een actie gebruikt.",
-            "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program."
-          }
-        },
-        "details": {
-          "title": "Details voor {target}",
-          "description": "Bij een actie is de data vooraf ingevuld met de voorbeelddata van de actie (zoals 'Vul voorbeelddata in' bij de ontwikkelhulpmiddelen). Haal weg wat je niet nodig hebt.",
-          "data": {
-            "action_data": "Actie-data (YAML, optioneel)",
             "on_value": "Waarde bij start",
             "off_value": "Waarde aan het eind (optioneel)",
+            "action": "Actie (optioneel)",
+            "action_data": "Actie-data (YAML, optioneel)",
             "ready_by": "Klaar om (optioneel)",
             "duration_hours": "Looptijd (uren, optioneel)",
             "start_offset_minutes": "Start-offset (minuten)"
           },
           "data_description": {
-            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
+            "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
+            "entity_id": "switch, number, select, button, script, … Leeg laten als je een actie gebruikt.",
             "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start.",
             "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+            "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program.",
+            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
+            "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok.",
+            "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
+            "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om')."
+          }
+        },
+        "reconfigure": {
+          "title": "Apparaat wijzigen",
+          "description": "Zonder 'klaar om' volgt het apparaat het gedeelde goedkoopste blok (plus offset); met 'klaar om' krijgt het een eigen goedkoopste venster dat op tijd klaar is.\n\nGebruik een entiteit (met een waarde bij start/eind) of een actie. Kies je een actie en laat je de data leeg, dan komt het formulier na Verzenden terug met de voorbeelddata van de actie ingevuld (zoals 'Vul voorbeelddata in' bij de ontwikkelhulpmiddelen): controleer die, haal weg wat je niet nodig hebt en verzend opnieuw.",
+          "data": {
+            "name": "Beschrijving",
+            "entity_id": "Entiteit",
+            "on_value": "Waarde bij start",
+            "off_value": "Waarde aan het eind (optioneel)",
+            "action": "Actie (optioneel)",
+            "action_data": "Actie-data (YAML, optioneel)",
+            "ready_by": "Klaar om (optioneel)",
+            "duration_hours": "Looptijd (uren, optioneel)",
+            "start_offset_minutes": "Start-offset (minuten)"
+          },
+          "data_description": {
+            "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
+            "entity_id": "switch, number, select, button, script, … Leeg laten als je een actie gebruikt.",
+            "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start.",
+            "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+            "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program.",
+            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
             "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok.",
             "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
             "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om')."
@@ -93,7 +97,8 @@
         "not_a_number": "Vul een getal in, of 'auto' voor seconden tot de start.",
         "entity_or_action": "Kies een entiteit of een actie.",
         "unknown_action": "Deze actie bestaat niet.",
-        "invalid_data": "De data is geen geldige YAML met sleutel: waarde-paren."
+        "invalid_data": "De data is geen geldige YAML met sleutel: waarde-paren.",
+        "off_needs_entity": "Een waarde aan het eind vereist een entiteit."
       },
       "abort": {
         "reconfigure_successful": "Apparaat opgeslagen."

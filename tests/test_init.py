@@ -39,17 +39,12 @@ def _mock_entry(*, options=None, **kwargs):
     )
 
 
-async def _subentry_flow(hass, entry, target, details, subentry_id=None):
-    """Run the add (or, with subentry_id, edit) flow of a device record."""
+async def _subentry_flow(hass, entry, user_input, subentry_id=None):
+    """Run the add (or, with subentry_id, edit) form of a device record."""
     context = {"source": "reconfigure", "subentry_id": subentry_id} if subentry_id else {"source": "user"}
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "record"), context=context)
     assert result["type"] == "form"
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], target)
-    if result.get("step_id") != "details":
-        return result, None
-    form = result
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], details)
-    return result, form
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
 
 
 async def test_schedules_devices(hass, freezer):
@@ -136,10 +131,10 @@ async def test_config_flow(hass):
 
     # Add a device record from the integration page ("Add device" -> subentry)
     hass.states.async_set("number.keuken_dishwasher_start_in_relative", "0")
-    result, _form = await _subentry_flow(
+    result = await _subentry_flow(
         hass, entry,
-        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative"},
-        {"on_value": "auto", "start_offset_minutes": 0},
+        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative",
+         "on_value": "auto", "start_offset_minutes": 0},
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
@@ -150,24 +145,32 @@ async def test_config_flow(hass):
     assert hass.states.get("sensor.vaatwasser_start") is not None
 
     # Invalid number value is rejected
-    result, _form = await _subentry_flow(
+    result = await _subentry_flow(
         hass, entry,
-        {"entity_id": "number.keuken_dishwasher_start_in_relative"},
-        {"on_value": "soon", "start_offset_minutes": 0},
+        {"entity_id": "number.keuken_dishwasher_start_in_relative", "on_value": "soon", "start_offset_minutes": 0},
     )
     assert result["errors"] == {"on_value": "not_a_number"}
 
     # Edit it with the settings icon (reconfigure): change the run time
-    result, form = await _subentry_flow(
-        hass, entry,
-        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative"},
-        {"on_value": "auto", "duration_hours": 2, "start_offset_minutes": 0},
-        subentry_id=subentry.subentry_id,
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "record"), context={"source": "reconfigure", "subentry_id": subentry.subentry_id}
+    )
+    # All fields on one form, filled with the current values
+    schema = result["data_schema"].schema
+    for field in ("name", "entity_id", "on_value", "off_value", "action", "action_data",
+                  "ready_by", "duration_hours", "start_offset_minutes"):
+        assert field in schema
+    assert next(k for k in schema if k == "on_value").description["suggested_value"] == "auto"
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative",
+         "on_value": "auto", "duration_hours": 2, "ready_by": "07:00:00", "start_offset_minutes": 0},
     )
     assert result["type"] == "abort" and result["reason"] == "reconfigure_successful"
     await hass.async_block_till_done()
     subentry = entry.subentries[subentry.subentry_id]
     assert subentry.data["duration_hours"] == 2
+    assert subentry.data["ready_by"] == "07:00:00"
     assert subentry.data["id"] == subentry.unique_id  # record id is kept
 
 
@@ -481,53 +484,68 @@ async def test_record_flow_action_and_example_data(hass):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # Step 1 validation
-    result, _ = await _subentry_flow(hass, entry, {"name": "Leeg"}, {})
+    # Validation
+    result = await _subentry_flow(hass, entry, {"name": "Leeg", "start_offset_minutes": 0})
     assert result["errors"] == {"base": "entity_or_action"}
-    result, _ = await _subentry_flow(hass, entry, {"action": "home_connect.nope"}, {})
+    result = await _subentry_flow(hass, entry, {"action": "home_connect.nope", "start_offset_minutes": 0})
     assert result["errors"] == {"action": "unknown_action"}
+    result = await _subentry_flow(
+        hass, entry, {"action": "home_connect.start_selected_program", "off_value": "off", "start_offset_minutes": 0}
+    )
+    assert result["errors"] == {"off_value": "off_needs_entity"}
 
-    # Step 2 is pre-filled with the example data, like "Fill example data"
+    # Action with empty data: the same form comes back once with the example data
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "record"), context={"source": "user"})
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Vaatwasser", "action": "home_connect.start_selected_program"}
+        result["flow_id"],
+        {"name": "Vaatwasser", "action": "home_connect.start_selected_program",
+         "ready_by": "07:00:00", "duration_hours": 2, "start_offset_minutes": 0},
     )
-    assert result["step_id"] == "details"
+    assert result["type"] == "form" and result["step_id"] == "user" and not result["errors"]
     schema = result["data_schema"].schema
-    key = next(k for k in schema if k == "action_data")
-    example = key.description["suggested_value"]
+    example = next(k for k in schema if k == "action_data").description["suggested_value"]
     assert "affects_to: selected_program" in example
     assert "b_s_h_common_option_start_in_relative: 3600" in example  # from a collapsed section
     assert "extra_dry" not in example  # false examples are skipped, like the frontend
     assert "# device_id:" in example  # required without example: hint
-    assert "on_value" not in schema and "off_value" not in schema
+    # what was filled in is kept
+    assert next(k for k in schema if k == "ready_by").description["suggested_value"] == "07:00:00"
 
     # Invalid YAML is rejected, valid data is saved
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"action_data": "- a\n- b", "start_offset_minutes": 0}
+        result["flow_id"],
+        {"name": "Vaatwasser", "action": "home_connect.start_selected_program",
+         "action_data": "- a\n- b", "start_offset_minutes": 0},
     )
     assert result["errors"] == {"action_data": "invalid_data"}
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
-        {"action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}",
-         "start_offset_minutes": 0},
+        {"name": "Vaatwasser", "action": "home_connect.start_selected_program",
+         "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}",
+         "ready_by": "07:00:00", "duration_hours": 2, "start_offset_minutes": 0},
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
     (subentry,) = entry.subentries.values()
     assert subentry.data["action"] == "home_connect.start_selected_program"
+    assert subentry.data["ready_by"] == "07:00:00"
     assert "entity_id" not in subentry.data
     assert "{seconds_until_start}" in subentry.data["action_data"]
 
-    # Editing keeps the own data (no example over it) as long as the action is the same
+    # Editing shows the own data (no example over it)
     result = await hass.config_entries.subentries.async_init(
         (entry.entry_id, "record"), context={"source": "reconfigure", "subentry_id": subentry.subentry_id}
     )
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Vaatwasser", "action": "home_connect.start_selected_program"}
-    )
     key = next(k for k in result["data_schema"].schema if k == "action_data")
     assert key.description["suggested_value"].startswith("device_id: abc")
+
+    # Data left empty on purpose: second submit saves without data
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "record"), context={"source": "user"})
+    user_input = {"name": "Leeg", "action": "home_connect.start_selected_program", "start_offset_minutes": 0}
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
+    assert result["type"] == "form"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
+    assert result["type"] == "create_entry"
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
