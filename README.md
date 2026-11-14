@@ -109,6 +109,10 @@ Every device record also gets **its own device** (listed under the scheduler in 
 | `sensor.<description>_start` | Planned start, with end, ready-by, average price and status as attributes |
 | `sensor.<description>_end` | When the run is expected to be finished |
 | `binary_sensor.<description>_active` | On while this record's run is in progress |
+| `button.<description>_test_start` | **Test**: run the start action right now, to check the device reacts. For `auto` records it sends the seconds until the planned start (or 60 s when nothing is planned). |
+| `button.<description>_test_stop` | **Test**: run the end action right now (only for records with a *value at end*) |
+
+The test buttons don't change the plan. If the action fails (entity missing, wrong value, device error) you get an error message in the UI.
 
 Removing a record in the options also removes its device.
 

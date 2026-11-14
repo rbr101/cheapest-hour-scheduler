@@ -19,6 +19,7 @@ from typing import Any, Callable
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_point_in_time,
@@ -63,6 +64,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
+TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
 PRICE_CACHE_KEEP = timedelta(days=1)
 # The shared block runs at most once a day: the next one starts at least this
 # long after the previous one started (gives some room to move within the day).
@@ -551,14 +553,58 @@ class CheapestHourScheduler:
 
         return _cb
 
-    async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
-        seconds = int((plan.start - now).total_seconds())
+    @staticmethod
+    def _relative_value(device: dict[str, Any], start: datetime, now: datetime) -> str:
+        """Value for "start in X seconds" devices (auto / {seconds_until_start})."""
+        seconds = int((start - now).total_seconds())
         # Round to whole minutes; most appliances only accept minute steps.
         seconds = max(0, (seconds // 60) * 60)
-        raw = str(plan.device.get(CONF_ON_VALUE)).strip()
-        value = str(seconds) if raw.lower() == AUTO_VALUE else raw.replace(SECONDS_PLACEHOLDER, str(seconds))
+        raw = str(device.get(CONF_ON_VALUE)).strip()
+        return str(seconds) if raw.lower() == AUTO_VALUE else raw.replace(SECONDS_PLACEHOLDER, str(seconds))
+
+    async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
+        value = self._relative_value(plan.device, plan.start, now)
         await self._apply(plan.device[CONF_ENTITY_ID], value)
         plan.armed_value = value
+
+    # -------------------------------------------------------------------- test
+
+    def test_value(self, dev_id: str, action: str) -> str | None:
+        """The value a test of `action` ("start"/"stop") would send, or None."""
+        device = next((d for d in self.devices if d[CONF_DEVICE_ID] == dev_id), None)
+        if device is None:
+            return None
+        if action == "stop":
+            off_value = str(device.get(CONF_OFF_VALUE) or "").strip()
+            return off_value or None
+        if _is_relative_value(device.get(CONF_ON_VALUE)):
+            now = dt_util.utcnow()
+            plan = self.device_plans.get(dev_id)
+            # Same as the schedule: seconds until the planned start. Without a
+            # future plan, ask the appliance to start in one minute.
+            start = plan.start if plan and plan.start > now else now + TEST_RELATIVE_DELAY
+            return self._relative_value(device, start, now)
+        return str(device.get(CONF_ON_VALUE, "on"))
+
+    async def async_test_record(self, dev_id: str, action: str) -> str:
+        """Run the start or stop action of a record right now (manual test).
+
+        Does not change the plan or what was already executed. Raises on failure
+        so the user sees the error.
+        """
+        device = next((d for d in self.devices if d[CONF_DEVICE_ID] == dev_id), None)
+        value = self.test_value(dev_id, action)
+        if device is None or value is None:
+            raise HomeAssistantError(f"Nothing to test for this record ({action})")
+        entity_id = device[CONF_ENTITY_ID]
+        _LOGGER.info("Test %s of %s: set %s to %s", action, self.name_of(device), entity_id, value)
+        try:
+            await self._call(entity_id, value)
+        except Exception as err:
+            self.last_error = f"test {entity_id}: {err}"
+            self._notify()
+            raise HomeAssistantError(f"Test failed: could not set {entity_id} to {value}: {err}") from err
+        return value
 
     async def _run_start(self, plan: DevicePlan) -> None:
         await self._apply(plan.device[CONF_ENTITY_ID], plan.device.get(CONF_ON_VALUE, "on"))
@@ -571,37 +617,46 @@ class CheapestHourScheduler:
         plan.stopped = True
 
     async def _apply(self, entity_id: str, value: Any) -> None:
-        """Translate (entity, value) into the right service call."""
+        """Scheduled action: never raises, errors end up in last_error."""
+        try:
+            await self._call(entity_id, value)
+        except Exception as err:  # noqa: BLE001 - never break the scheduler
+            self.last_error = f"{entity_id}: {err}"
+            _LOGGER.error("Failed to set %s to %s: %s", entity_id, value, err)
+
+    async def _call(self, entity_id: str, value: Any) -> None:
+        """Translate (entity, value) into the right service call. Raises on error."""
         domain = entity_id.split(".", 1)[0]
         text = str(value).strip()
         lower = text.lower()
         target = {"entity_id": entity_id}
 
-        try:
-            if domain in NUMBER_DOMAINS:
-                await self.hass.services.async_call(
-                    domain, "set_value", {**target, "value": float(text)}, blocking=True
-                )
-            elif domain in SELECT_DOMAINS:
-                await self.hass.services.async_call(
-                    domain, "select_option", {**target, "option": text}, blocking=True
-                )
-            elif domain in ("button", "input_button"):
-                await self.hass.services.async_call(domain, "press", target, blocking=True)
-            elif domain == "script" and lower in ON_WORDS:
-                await self.hass.services.async_call("script", "turn_on", target, blocking=True)
-            elif lower in ON_WORDS or lower in OFF_WORDS:
-                service = "turn_on" if lower in ON_WORDS else "turn_off"
-                svc_domain = domain if domain in TOGGLE_DOMAINS else "homeassistant"
-                await self.hass.services.async_call(svc_domain, service, target, blocking=True)
-            elif domain == "climate":
-                await self.hass.services.async_call(
-                    domain, "set_hvac_mode", {**target, "hvac_mode": text}, blocking=True
-                )
-            else:
-                _LOGGER.warning("Don't know how to set %s to %s", entity_id, text)
-                return
-            _LOGGER.info("Set %s to %s", entity_id, text)
-        except Exception as err:  # noqa: BLE001 - never break the scheduler
-            self.last_error = f"{entity_id}: {err}"
-            _LOGGER.error("Failed to set %s to %s: %s", entity_id, text, err)
+        if self.hass.states.get(entity_id) is None:
+            raise HomeAssistantError(f"{entity_id} does not exist")
+        if domain in NUMBER_DOMAINS:
+            try:
+                number = float(text)
+            except ValueError as err:
+                raise HomeAssistantError(f"'{text}' is not a number") from err
+            await self.hass.services.async_call(
+                domain, "set_value", {**target, "value": number}, blocking=True
+            )
+        elif domain in SELECT_DOMAINS:
+            await self.hass.services.async_call(
+                domain, "select_option", {**target, "option": text}, blocking=True
+            )
+        elif domain in ("button", "input_button"):
+            await self.hass.services.async_call(domain, "press", target, blocking=True)
+        elif domain == "script" and lower in ON_WORDS:
+            await self.hass.services.async_call("script", "turn_on", target, blocking=True)
+        elif lower in ON_WORDS or lower in OFF_WORDS:
+            service = "turn_on" if lower in ON_WORDS else "turn_off"
+            svc_domain = domain if domain in TOGGLE_DOMAINS else "homeassistant"
+            await self.hass.services.async_call(svc_domain, service, target, blocking=True)
+        elif domain == "climate":
+            await self.hass.services.async_call(
+                domain, "set_hvac_mode", {**target, "hvac_mode": text}, blocking=True
+            )
+        else:
+            raise HomeAssistantError(f"Don't know how to set {entity_id} to '{text}'")
+        _LOGGER.info("Set %s to %s", entity_id, text)

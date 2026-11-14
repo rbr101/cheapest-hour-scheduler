@@ -137,6 +137,12 @@
     "button": {
       "replan": {
         "name": "Herberekenen"
+      },
+      "test_start": {
+        "name": "Test start"
+      },
+      "test_stop": {
+        "name": "Test stop"
       }
     }
   }

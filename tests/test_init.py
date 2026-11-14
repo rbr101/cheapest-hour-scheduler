@@ -300,3 +300,53 @@ async def test_record_description_device_and_switch(hass, freezer):
     await hass.async_block_till_done()
     assert registry.async_get_device(identifiers={(DOMAIN, f"{entry.entry_id}_a")}) is None
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_record_test_buttons(hass):
+    from homeassistant.exceptions import HomeAssistantError
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    values = [0.6] * 8 + [0.2] * 4 + [0.6] * 20
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
+    assert await async_setup_component(
+        hass, "input_number", {"input_number": {"dishwasher": {"min": 0, "max": 86400, "step": 60}}}
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [
+            {"id": "a", "name": "Thuisaccu", "entity_id": "input_boolean.charger", "on_value": "on", "off_value": "off"},
+            {"id": "b", "name": "Vaatwasser", "entity_id": "input_number.dishwasher", "on_value": "auto"},
+            {"id": "c", "name": "Kapot", "entity_id": "switch.does_not_exist", "on_value": "on"},
+        ]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    sched = hass.data[DOMAIN][entry.entry_id]
+
+    # Start/stop buttons for a switch record; the plan is not touched
+    assert hass.states.get("button.thuisaccu_test_start") is not None
+    await hass.services.async_call("button", "press", {"entity_id": "button.thuisaccu_test_start"}, blocking=True)
+    assert hass.states.get("input_boolean.charger").state == "on"
+    assert sched.device_plans["a"].started is False
+    await hass.services.async_call("button", "press", {"entity_id": "button.thuisaccu_test_stop"}, blocking=True)
+    assert hass.states.get("input_boolean.charger").state == "off"
+
+    # 'auto' record: no stop button, test sends seconds until the planned start
+    assert hass.states.get("button.vaatwasser_test_stop") is None
+    hass.states.async_set("input_number.dishwasher", "0")
+    await hass.services.async_call("button", "press", {"entity_id": "button.vaatwasser_test_start"}, blocking=True)
+    secs = float(hass.states.get("input_number.dishwasher").state)
+    expected = (slot0 + timedelta(hours=2) - dt_util.utcnow()).total_seconds()
+    assert abs(secs - expected) <= 120
+
+    # A failing device shows an error to the user
+    with pytest.raises(HomeAssistantError, match="does not exist"):
+        await hass.services.async_call("button", "press", {"entity_id": "button.kapot_test_start"}, blocking=True)
+    assert await hass.config_entries.async_unload(entry.entry_id)

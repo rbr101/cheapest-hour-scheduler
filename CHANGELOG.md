@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.3] - 2026-11-14
+
+### Added
+- **Test start** and **Test stop** buttons on every record device. They run the
+  scheduled start/end action right now so you can check the device reacts. The plan
+  is not changed. Failures are shown as an error in the UI.
+
+### Changed
+- Scheduled actions on a non-existing entity, or with an unknown value, are now
+  logged as errors (and shown in `last_error`) instead of a warning.
+
 ## [0.6.2] - 2026-11-10
 
 ### Added
