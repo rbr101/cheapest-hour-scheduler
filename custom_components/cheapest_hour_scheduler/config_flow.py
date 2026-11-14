@@ -9,11 +9,14 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_NAME
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
 
 from .const import (
     AUTO_VALUE,
+    CONF_ACTION,
+    CONF_ACTION_DATA,
     CONF_BLOCK_HOURS,
     CONF_DESCRIPTION,
     CONF_DEVICE_ID,
@@ -29,6 +32,7 @@ from .const import (
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
 )
+from .scheduler import render_action_data
 
 DEVICE_DOMAINS = [
     "switch",
@@ -67,58 +71,95 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-DEVICE_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_DESCRIPTION): selector.TextSelector(),
-        vol.Required(CONF_ENTITY_ID): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain=DEVICE_DOMAINS)
-        ),
-        vol.Required(CONF_ON_VALUE, default="on"): selector.TextSelector(),
-        vol.Optional(CONF_OFF_VALUE): selector.TextSelector(),
-        vol.Optional(CONF_READY_BY): selector.TimeSelector(),
-        vol.Optional(CONF_DURATION): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0.25, max=24, step=0.25, unit_of_measurement="h",
-                mode=selector.NumberSelectorMode.BOX,
-            )
-        ),
-        vol.Optional(CONF_OFFSET, default=0): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0, max=1440, step=15, unit_of_measurement="min",
-                mode=selector.NumberSelectorMode.BOX,
-            )
-        ),
-    }
-)
+def _service_options(hass: HomeAssistant) -> list[str]:
+    """All available actions (services) as "domain.service", for the dropdown."""
+    return sorted(
+        f"{domain}.{service}"
+        for domain, services in hass.services.async_services().items()
+        for service in services
+    )
+
+
+def _device_schema(hass: HomeAssistant) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(CONF_DESCRIPTION): selector.TextSelector(),
+            vol.Optional(CONF_ENTITY_ID): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=DEVICE_DOMAINS)
+            ),
+            vol.Optional(CONF_ON_VALUE, default="on"): selector.TextSelector(),
+            vol.Optional(CONF_OFF_VALUE): selector.TextSelector(),
+            vol.Optional(CONF_ACTION): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=_service_options(hass),
+                    custom_value=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(CONF_ACTION_DATA): selector.TextSelector(
+                selector.TextSelectorConfig(multiline=True)
+            ),
+            vol.Optional(CONF_READY_BY): selector.TimeSelector(),
+            vol.Optional(CONF_DURATION): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.25, max=24, step=0.25, unit_of_measurement="h",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(CONF_OFFSET, default=0): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=1440, step=15, unit_of_measurement="min",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+        }
+    )
 
 
 def _clean_device(user_input: dict[str, Any], dev_id: str | None = None) -> dict[str, Any]:
-    device = {
+    device: dict[str, Any] = {
         CONF_DEVICE_ID: dev_id or uuid.uuid4().hex[:8],
-        CONF_ENTITY_ID: user_input[CONF_ENTITY_ID],
-        CONF_ON_VALUE: str(user_input.get(CONF_ON_VALUE, "on")).strip(),
+        CONF_ON_VALUE: str(user_input.get(CONF_ON_VALUE) or "on").strip(),
         CONF_OFFSET: float(user_input.get(CONF_OFFSET) or 0),
     }
-    if str(user_input.get(CONF_OFF_VALUE) or "").strip():
-        device[CONF_OFF_VALUE] = str(user_input[CONF_OFF_VALUE]).strip()
+    for key in (CONF_ENTITY_ID, CONF_OFF_VALUE, CONF_DESCRIPTION, CONF_ACTION):
+        if str(user_input.get(key) or "").strip():
+            device[key] = str(user_input[key]).strip()
+    if str(user_input.get(CONF_ACTION_DATA) or "").strip():
+        device[CONF_ACTION_DATA] = str(user_input[CONF_ACTION_DATA]).rstrip()
     if user_input.get(CONF_DURATION):
         device[CONF_DURATION] = float(user_input[CONF_DURATION])
     if user_input.get(CONF_READY_BY):
         device[CONF_READY_BY] = str(user_input[CONF_READY_BY])
-    if str(user_input.get(CONF_DESCRIPTION) or "").strip():
-        device[CONF_DESCRIPTION] = str(user_input[CONF_DESCRIPTION]).strip()
     return device
 
 
-def _validate_device(user_input: dict[str, Any]) -> dict[str, str]:
+def _validate_device(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
     errors: dict[str, str] = {}
-    domain = user_input[CONF_ENTITY_ID].split(".", 1)[0]
-    value = str(user_input.get(CONF_ON_VALUE, "")).strip()
-    if domain in ("number", "input_number") and value.lower() != AUTO_VALUE and "{" not in value:
+    entity_id = str(user_input.get(CONF_ENTITY_ID) or "").strip()
+    action = str(user_input.get(CONF_ACTION) or "").strip()
+
+    if not entity_id and not action:
+        errors["base"] = "entity_or_action"
+        return errors
+
+    if action:
+        domain, _, service = action.partition(".")
+        if not service or not hass.services.has_service(domain, service):
+            errors[CONF_ACTION] = "unknown_action"
         try:
-            float(value)
-        except ValueError:
-            errors[CONF_ON_VALUE] = "not_a_number"
+            render_action_data(user_input.get(CONF_ACTION_DATA))
+        except HomeAssistantError:
+            errors[CONF_ACTION_DATA] = "invalid_data"
+    elif entity_id.split(".", 1)[0] in ("number", "input_number"):
+        value = str(user_input.get(CONF_ON_VALUE, "")).strip()
+        if value.lower() != AUTO_VALUE and "{" not in value:
+            try:
+                float(value)
+            except ValueError:
+                errors[CONF_ON_VALUE] = "not_a_number"
+    if user_input.get(CONF_OFF_VALUE) and not entity_id:
+        errors[CONF_OFF_VALUE] = "off_needs_entity"
     return errors
 
 
@@ -177,7 +218,10 @@ class CheapestHourOptionsFlow(OptionsFlow):
         labels = []
         for d in self._get_devices():
             parts = [d[CONF_DESCRIPTION]] if d.get(CONF_DESCRIPTION) else []
-            parts += [f"({d[CONF_ENTITY_ID]})" if parts else d[CONF_ENTITY_ID], f"→ {d[CONF_ON_VALUE]}"]
+            target = d.get(CONF_ACTION) or d.get(CONF_ENTITY_ID, "")
+            parts += [f"({target})" if parts else target]
+            if not d.get(CONF_ACTION):
+                parts.append(f"→ {d[CONF_ON_VALUE]}")
             if d.get(CONF_DURATION):
                 parts.append(f"{d[CONF_DURATION]:g} h")
             if d.get(CONF_READY_BY):
@@ -207,13 +251,13 @@ class CheapestHourOptionsFlow(OptionsFlow):
     async def async_step_add_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = _validate_device(user_input)
+            errors = _validate_device(self.hass, user_input)
             if not errors:
                 self._get_devices().append(_clean_device(user_input))
                 return self._save()
         return self.async_show_form(
             step_id="add_device",
-            data_schema=self.add_suggested_values_to_schema(DEVICE_SCHEMA, user_input or {}),
+            data_schema=self.add_suggested_values_to_schema(_device_schema(self.hass), user_input or {}),
             errors=errors,
         )
 
@@ -239,13 +283,13 @@ class CheapestHourOptionsFlow(OptionsFlow):
         current = next(d for d in devices if d[CONF_DEVICE_ID] == self._edit_id)
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = _validate_device(user_input)
+            errors = _validate_device(self.hass, user_input)
             if not errors:
                 devices[devices.index(current)] = _clean_device(user_input, self._edit_id)
                 return self._save()
         return self.async_show_form(
             step_id="edit_device_form",
-            data_schema=self.add_suggested_values_to_schema(DEVICE_SCHEMA, user_input or current),
+            data_schema=self.add_suggested_values_to_schema(_device_schema(self.hass), user_input or current),
             errors=errors,
         )
 

@@ -47,15 +47,19 @@
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
+          "action": "Actie (optioneel)",
+          "action_data": "Actie-data (YAML, optioneel)",
           "duration_hours": "Looptijd (uren, optioneel)",
           "start_offset_minutes": "Start-offset (minuten)",
           "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
           "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
-          "entity_id": "switch, number, select, button, script, …",
-          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
-          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+          "entity_id": "switch, number, select, button, script, … Optioneel als er een actie is ingevuld.",
+          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative. Wordt niet gebruikt als er een actie is ingevuld.",
+          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen. Vereist een entiteit.",
+          "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program. Leeg = de entiteit zetten.",
+          "action_data": "Data voor de actie als YAML. Gebruik {seconds_until_start} (of {minutes_until_start}) voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
           "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
           "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om').",
           "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok."
@@ -75,15 +79,19 @@
           "entity_id": "Entiteit",
           "on_value": "Waarde bij start",
           "off_value": "Waarde aan het eind (optioneel)",
+          "action": "Actie (optioneel)",
+          "action_data": "Actie-data (YAML, optioneel)",
           "duration_hours": "Looptijd (uren, optioneel)",
           "start_offset_minutes": "Start-offset (minuten)",
           "ready_by": "Klaar om (optioneel)"
         },
         "data_description": {
           "name": "Wordt overal getoond in plaats van de entiteitsnaam, bv. 'Vaatwasser'.",
-          "entity_id": "switch, number, select, button, script, …",
-          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative.",
-          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
+          "entity_id": "switch, number, select, button, script, … Optioneel als er een actie is ingevuld.",
+          "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start, bv. voor number.keuken_dishwasher_start_in_relative. Wordt niet gebruikt als er een actie is ingevuld.",
+          "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen. Vereist een entiteit.",
+          "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program. Leeg = de entiteit zetten.",
+          "action_data": "Data voor de actie als YAML. Gebruik {seconds_until_start} (of {minutes_until_start}) voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
           "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
           "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om').",
           "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok."
@@ -97,7 +105,11 @@
       }
     },
     "error": {
-      "not_a_number": "Vul een getal in, of 'auto' voor seconden tot de start."
+      "not_a_number": "Vul een getal in, of 'auto' voor seconden tot de start.",
+      "entity_or_action": "Kies een entiteit of een actie.",
+      "unknown_action": "Deze actie bestaat niet.",
+      "invalid_data": "De data is geen geldige YAML met sleutel: waarde-paren.",
+      "off_needs_entity": "Een waarde aan het eind vereist een entiteit."
     }
   },
   "entity": {

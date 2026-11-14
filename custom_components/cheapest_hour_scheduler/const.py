@@ -14,6 +14,8 @@ CONF_OFF_VALUE = "off_value"
 CONF_DURATION = "duration_hours"
 CONF_OFFSET = "start_offset_minutes"
 CONF_READY_BY = "ready_by"
+CONF_ACTION = "action"  # optional service to call at start, e.g. home_connect.start_selected_program
+CONF_ACTION_DATA = "action_data"  # YAML data for that service
 CONF_DESCRIPTION = "name"  # description shown instead of the entity name
 
 DEFAULT_PRICE_SENSOR = "sensor.zonneplan_current_tariff_rounded"
@@ -25,6 +27,7 @@ ATTR_PRICES_TOMORROW = "prices_tomorrow"
 # Placeholder in on_value: replaced by seconds from "now" until the device's start.
 # Useful for e.g. number.keuken_dishwasher_start_in_relative
 SECONDS_PLACEHOLDER = "{seconds_until_start}"
+MINUTES_PLACEHOLDER = "{minutes_until_start}"
 AUTO_VALUE = "auto"
 
 PLATFORMS = ["sensor", "binary_sensor", "switch", "button"]

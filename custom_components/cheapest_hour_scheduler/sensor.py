@@ -66,7 +66,8 @@ def _plan_attrs(p, name: str) -> dict[str, Any]:
     local = dt_util.as_local
     return {
         "name": name,
-        "entity_id": p.device[CONF_ENTITY_ID],
+        "entity_id": p.device.get(CONF_ENTITY_ID),
+        "action": p.device.get("action"),
         "value": p.armed_value or p.device.get(CONF_ON_VALUE),
         "start": local(p.start).isoformat(),
         "end": local(p.end).isoformat() if p.end else None,
@@ -98,7 +99,8 @@ class RecordStartSensor(RecordEntity, SensorEntity):
         plan = s.device_plans.get(self._dev_id)
         attrs: dict[str, Any] = {
             "name": s.name_of(self._record),
-            "entity_id": self._record[CONF_ENTITY_ID],
+            "entity_id": self._record.get(CONF_ENTITY_ID),
+            "action": self._record.get("action"),
             "ready_by_time": self._record.get(CONF_READY_BY),
             "record_enabled": s.is_record_enabled(self._dev_id),
         }

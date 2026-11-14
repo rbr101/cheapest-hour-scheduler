@@ -29,7 +29,7 @@ def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
         plan = scheduler.device_plans.get(dev_id)
         item: dict[str, Any] = {
             "id": dev_id,
-            "entity_id": device[CONF_ENTITY_ID],
+            "entity_id": device.get(CONF_ENTITY_ID) or device.get("action"),
             "name": scheduler.name_of(device),
             "enabled": scheduler.is_record_enabled(dev_id),
             "ready_by": device.get(CONF_READY_BY),

@@ -47,15 +47,19 @@
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
+          "action": "Action (optional)",
+          "action_data": "Action data (YAML, optional)",
           "duration_hours": "Run time (hours, optional)",
           "start_offset_minutes": "Start offset (minutes)",
           "ready_by": "Ready by (optional)"
         },
         "data_description": {
           "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
-          "entity_id": "switch, number, select, button, script, …",
-          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
-          "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
+          "entity_id": "switch, number, select, button, script, … Optional when an action is set.",
+          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative. Not used when an action is set.",
+          "off_value": "Usually 'off'. Leave empty to do nothing at the end. Needs an entity.",
+          "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program. Leave empty to set the entity.",
+          "action_data": "Data for the action as YAML. Use {seconds_until_start} (or {minutes_until_start}) for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = no data.",
           "duration_hours": "How long it must stay on. Empty = until the end of the block.",
           "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
           "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
@@ -75,15 +79,19 @@
           "entity_id": "Entity",
           "on_value": "Value at start",
           "off_value": "Value at end (optional)",
+          "action": "Action (optional)",
+          "action_data": "Action data (YAML, optional)",
           "duration_hours": "Run time (hours, optional)",
           "start_offset_minutes": "Start offset (minutes)",
           "ready_by": "Ready by (optional)"
         },
         "data_description": {
           "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
-          "entity_id": "switch, number, select, button, script, …",
-          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative.",
-          "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
+          "entity_id": "switch, number, select, button, script, … Optional when an action is set.",
+          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative. Not used when an action is set.",
+          "off_value": "Usually 'off'. Leave empty to do nothing at the end. Needs an entity.",
+          "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program. Leave empty to set the entity.",
+          "action_data": "Data for the action as YAML. Use {seconds_until_start} (or {minutes_until_start}) for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = no data.",
           "duration_hours": "How long it must stay on. Empty = until the end of the block.",
           "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
           "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
@@ -97,7 +105,11 @@
       }
     },
     "error": {
-      "not_a_number": "Enter a number, or 'auto' for seconds until start."
+      "not_a_number": "Enter a number, or 'auto' for seconds until start.",
+      "entity_or_action": "Choose an entity or an action.",
+      "unknown_action": "This action does not exist.",
+      "invalid_data": "The data is not valid YAML with key: value pairs.",
+      "off_needs_entity": "A value at end needs an entity."
     }
   },
   "entity": {

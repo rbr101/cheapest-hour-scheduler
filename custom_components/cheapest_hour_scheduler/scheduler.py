@@ -14,7 +14,9 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
+
+import yaml
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -33,6 +35,8 @@ from .const import (
     ATTR_PRICES_TODAY,
     ATTR_PRICES_TOMORROW,
     AUTO_VALUE,
+    CONF_ACTION,
+    CONF_ACTION_DATA,
     CONF_BLOCK_HOURS,
     CONF_DESCRIPTION,
     CONF_DEVICE_ID,
@@ -47,6 +51,7 @@ from .const import (
     DEFAULT_BLOCK_HOURS,
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
+    MINUTES_PLACEHOLDER,
     SECONDS_PLACEHOLDER,
     SIGNAL_UPDATE,
 )
@@ -111,7 +116,7 @@ class DevicePlan:
 
     @property
     def is_relative(self) -> bool:
-        return _is_relative_value(self.device.get(CONF_ON_VALUE))
+        return record_is_relative(self.device)
 
     def finished(self, now: datetime) -> bool:
         return self.start <= now and self.run_end <= now
@@ -164,14 +169,55 @@ def _is_relative_value(value: Any) -> bool:
     return text == AUTO_VALUE or SECONDS_PLACEHOLDER in text
 
 
+def record_action(device: dict[str, Any]) -> str:
+    """The service a record calls at start ("" when it sets an entity)."""
+    return str(device.get(CONF_ACTION) or "").strip()
+
+
+def record_is_relative(device: dict[str, Any]) -> bool:
+    """Does the start action carry "seconds until start" (sent ahead of time)?"""
+    if record_action(device):
+        data = str(device.get(CONF_ACTION_DATA) or "")
+        return SECONDS_PLACEHOLDER in data or MINUTES_PLACEHOLDER in data
+    return _is_relative_value(device.get(CONF_ON_VALUE))
+
+
+def render_action_data(text: Any, seconds: int = 0) -> dict[str, Any]:
+    """Parse the YAML data of a record's action, filling in the placeholders.
+
+    Placeholders are replaced before parsing, so they need no quotes:
+    ``b_s_h_common_option_start_in_relative: {seconds_until_start}``.
+    Empty text means: call the action without data.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    raw = raw.replace(SECONDS_PLACEHOLDER, str(seconds)).replace(
+        MINUTES_PLACEHOLDER, str(seconds // 60)
+    )
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as err:
+        raise HomeAssistantError(f"Invalid action data: {err}") from err
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise HomeAssistantError("Action data must be key: value pairs")
+    return data
+
+
 def record_name(hass: HomeAssistant, device: dict[str, Any]) -> str:
-    """Description of a record, falling back to the entity's friendly name."""
+    """Description of a record, falling back to the entity's or action's name."""
     if str(device.get(CONF_DESCRIPTION) or "").strip():
         return str(device[CONF_DESCRIPTION]).strip()
-    state = hass.states.get(device[CONF_ENTITY_ID])
-    if state and state.attributes.get("friendly_name"):
-        return state.attributes["friendly_name"]
-    return device[CONF_ENTITY_ID].split(".", 1)[-1].replace("_", " ").capitalize()
+    entity_id = device.get(CONF_ENTITY_ID)
+    if entity_id:
+        state = hass.states.get(entity_id)
+        if state and state.attributes.get("friendly_name"):
+            return state.attributes["friendly_name"]
+        return entity_id.split(".", 1)[-1].replace("_", " ").capitalize()
+    action = record_action(device)
+    return action.split(".", 1)[-1].replace("_", " ").capitalize() if action else "Record"
 
 
 def _hours(device: dict[str, Any], default: float) -> float:
@@ -398,7 +444,7 @@ class CheapestHourScheduler:
     def _new_plan(self, device: dict[str, Any], prev: DevicePlan | None, now: datetime) -> DevicePlan | None:
         """Compute the next plan for one record (prev is not running)."""
         dev_id = device[CONF_DEVICE_ID]
-        relative_only = _is_relative_value(device.get(CONF_ON_VALUE)) and not device.get(CONF_OFF_VALUE)
+        relative_only = record_is_relative(device) and not device.get(CONF_OFF_VALUE)
         ready_by = parse_time_of_day(device.get(CONF_READY_BY))
 
         if ready_by is None:
@@ -553,38 +599,72 @@ class CheapestHourScheduler:
 
         return _cb
 
-    @staticmethod
-    def _relative_value(device: dict[str, Any], start: datetime, now: datetime) -> str:
-        """Value for "start in X seconds" devices (auto / {seconds_until_start})."""
+    def _prepare_start(
+        self, device: dict[str, Any], start: datetime, now: datetime
+    ) -> tuple[str, Callable[[], Awaitable[None]]]:
+        """What the start action sends (summary) and a callable that does it.
+
+        Raises HomeAssistantError when the record's data is invalid.
+        """
         seconds = int((start - now).total_seconds())
         # Round to whole minutes; most appliances only accept minute steps.
         seconds = max(0, (seconds // 60) * 60)
-        raw = str(device.get(CONF_ON_VALUE)).strip()
-        return str(seconds) if raw.lower() == AUTO_VALUE else raw.replace(SECONDS_PLACEHOLDER, str(seconds))
+
+        action = record_action(device)
+        if action:
+            data = render_action_data(device.get(CONF_ACTION_DATA), seconds)
+            summary = action + (": " + ", ".join(f"{k}={v}" for k, v in data.items()) if data else "")
+            return summary, lambda: self._call_action(action, data)
+
+        entity_id = device.get(CONF_ENTITY_ID)
+        if not entity_id:
+            raise HomeAssistantError("Record has no entity and no action")
+        raw = str(device.get(CONF_ON_VALUE, "on")).strip()
+        if _is_relative_value(raw):
+            value = str(seconds) if raw.lower() == AUTO_VALUE else raw.replace(SECONDS_PLACEHOLDER, str(seconds))
+        else:
+            value = raw
+        return value, lambda: self._call(entity_id, value)
+
+    async def _start_now(self, device: dict[str, Any], start: datetime) -> str:
+        """Scheduled start: never raises, errors end up in last_error."""
+        summary = "error"
+        try:
+            summary, run = self._prepare_start(device, start, dt_util.utcnow())
+            await run()
+        except Exception as err:  # noqa: BLE001 - never break the scheduler
+            self.last_error = f"{self.name_of(device)}: {err}"
+            _LOGGER.error("Start of %s failed: %s", self.name_of(device), err)
+        return summary
 
     async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
-        value = self._relative_value(plan.device, plan.start, now)
-        await self._apply(plan.device[CONF_ENTITY_ID], value)
-        plan.armed_value = value
+        # Sent once per planned start moment, also when it fails (no retry storm).
+        plan.armed_value = await self._start_now(plan.device, plan.start)
 
     # -------------------------------------------------------------------- test
 
+    def _test_start_moment(self, dev_id: str, device: dict[str, Any], now: datetime) -> datetime:
+        # Same as the schedule: seconds until the planned start. Without a
+        # future plan, ask the appliance to start in one minute.
+        plan = self.device_plans.get(dev_id)
+        if record_is_relative(device):
+            return plan.start if plan and plan.start > now else now + TEST_RELATIVE_DELAY
+        return now
+
     def test_value(self, dev_id: str, action: str) -> str | None:
-        """The value a test of `action` ("start"/"stop") would send, or None."""
+        """What a test of `action` ("start"/"stop") would send, or None."""
         device = next((d for d in self.devices if d[CONF_DEVICE_ID] == dev_id), None)
         if device is None:
             return None
         if action == "stop":
             off_value = str(device.get(CONF_OFF_VALUE) or "").strip()
-            return off_value or None
-        if _is_relative_value(device.get(CONF_ON_VALUE)):
-            now = dt_util.utcnow()
-            plan = self.device_plans.get(dev_id)
-            # Same as the schedule: seconds until the planned start. Without a
-            # future plan, ask the appliance to start in one minute.
-            start = plan.start if plan and plan.start > now else now + TEST_RELATIVE_DELAY
-            return self._relative_value(device, start, now)
-        return str(device.get(CONF_ON_VALUE, "on"))
+            return off_value if off_value and device.get(CONF_ENTITY_ID) else None
+        now = dt_util.utcnow()
+        try:
+            summary, _run = self._prepare_start(device, self._test_start_moment(dev_id, device, now), now)
+        except HomeAssistantError as err:
+            return f"invalid: {err}"
+        return summary
 
     async def async_test_record(self, dev_id: str, action: str) -> str:
         """Run the start or stop action of a record right now (manual test).
@@ -593,28 +673,44 @@ class CheapestHourScheduler:
         so the user sees the error.
         """
         device = next((d for d in self.devices if d[CONF_DEVICE_ID] == dev_id), None)
-        value = self.test_value(dev_id, action)
-        if device is None or value is None:
-            raise HomeAssistantError(f"Nothing to test for this record ({action})")
-        entity_id = device[CONF_ENTITY_ID]
-        _LOGGER.info("Test %s of %s: set %s to %s", action, self.name_of(device), entity_id, value)
+        if device is None:
+            raise HomeAssistantError("Unknown record")
+        name = self.name_of(device)
         try:
-            await self._call(entity_id, value)
+            if action == "stop":
+                value = self.test_value(dev_id, "stop")
+                if value is None:
+                    raise HomeAssistantError("This record has no end value")
+                await self._call(device[CONF_ENTITY_ID], value)
+            else:
+                now = dt_util.utcnow()
+                value, run = self._prepare_start(device, self._test_start_moment(dev_id, device, now), now)
+                await run()
         except Exception as err:
-            self.last_error = f"test {entity_id}: {err}"
+            self.last_error = f"test {name}: {err}"
             self._notify()
-            raise HomeAssistantError(f"Test failed: could not set {entity_id} to {value}: {err}") from err
+            raise HomeAssistantError(f"Test {action} of {name} failed: {err}") from err
+        _LOGGER.info("Test %s of %s: %s", action, name, value)
         return value
 
     async def _run_start(self, plan: DevicePlan) -> None:
-        await self._apply(plan.device[CONF_ENTITY_ID], plan.device.get(CONF_ON_VALUE, "on"))
+        await self._start_now(plan.device, plan.start)
         plan.started = True
 
     async def _run_stop(self, plan: DevicePlan) -> None:
         off_value = plan.device.get(CONF_OFF_VALUE)
-        if off_value not in (None, ""):
-            await self._apply(plan.device[CONF_ENTITY_ID], off_value)
+        entity_id = plan.device.get(CONF_ENTITY_ID)
+        if off_value not in (None, "") and entity_id:
+            await self._apply(entity_id, off_value)
         plan.stopped = True
+
+    async def _call_action(self, action: str, data: dict[str, Any]) -> None:
+        """Call a service such as home_connect.start_selected_program. Raises."""
+        domain, _, service = action.partition(".")
+        if not service or not self.hass.services.has_service(domain, service):
+            raise HomeAssistantError(f"Action {action} does not exist")
+        await self.hass.services.async_call(domain, service, data, blocking=True)
+        _LOGGER.info("Called %s with %s", action, data)
 
     async def _apply(self, entity_id: str, value: Any) -> None:
         """Scheduled action: never raises, errors end up in last_error."""

@@ -350,3 +350,98 @@ async def test_record_test_buttons(hass):
     with pytest.raises(HomeAssistantError, match="does not exist"):
         await hass.services.async_call("button", "press", {"entity_id": "button.kapot_test_start"}, blocking=True)
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_record_with_action(hass, freezer):
+    from homeassistant.core import ServiceCall
+
+    calls: list[ServiceCall] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("home_connect", "start_selected_program", _record)
+    hass.services.async_register("script", "boiler_boost", _record)
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    values = [0.6] * 8 + [0.2] * 4 + [0.6] * 20
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [
+            {"id": "dw", "name": "Vaatwasser", "on_value": "on",
+             "action": "home_connect.start_selected_program",
+             "action_data": "device_id: 9c11835a9a1add7e34dbdcf6956e70b8\n"
+                            "b_s_h_common_option_start_in_relative: {seconds_until_start}"},
+            {"id": "bb", "name": "Boiler boost", "on_value": "on", "action": "script.boiler_boost"},
+        ]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Relative action: called right away with the seconds until the block start
+    assert len(calls) == 1
+    call = calls[0]
+    assert (call.domain, call.service) == ("home_connect", "start_selected_program")
+    assert call.data["device_id"] == "9c11835a9a1add7e34dbdcf6956e70b8"
+    expected = (slot0 + timedelta(hours=2) - dt_util.utcnow()).total_seconds()
+    assert abs(call.data["b_s_h_common_option_start_in_relative"] - expected) <= 120
+    assert call.data["b_s_h_common_option_start_in_relative"] % 60 == 0
+
+    # Plain action without data: called at the block start, without data
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=1))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert len(calls) == 2
+    assert (calls[1].domain, calls[1].service) == ("script", "boiler_boost")
+    assert dict(calls[1].data) == {}
+
+    # Test button runs the action; no stop button without an entity
+    assert hass.states.get("button.vaatwasser_test_stop") is None
+    await hass.services.async_call("button", "press", {"entity_id": "button.vaatwasser_test_start"}, blocking=True)
+    assert len(calls) == 3
+    assert calls[2].data["b_s_h_common_option_start_in_relative"] == 60  # no future plan -> 1 min
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_options_flow_action_validation(hass):
+    hass.services.async_register("home_connect", "start_selected_program", lambda call: None)
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Test",
+        data={"price_sensor": "sensor.price", "block_hours": 1}, options={"devices": []},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    async def add(user_input):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "add_device"})
+        return await hass.config_entries.options.async_configure(result["flow_id"], user_input)
+
+    result = await add({"on_value": "on", "start_offset_minutes": 0})
+    assert result["errors"] == {"base": "entity_or_action"}
+    result = await add({"action": "home_connect.nope", "start_offset_minutes": 0})
+    assert result["errors"] == {"action": "unknown_action"}
+    result = await add({"action": "home_connect.start_selected_program", "action_data": "- a\n- b", "start_offset_minutes": 0})
+    assert result["errors"] == {"action_data": "invalid_data"}
+
+    result = await add({
+        "name": "Vaatwasser",
+        "action": "home_connect.start_selected_program",
+        "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}",
+        "start_offset_minutes": 0,
+    })
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    device = entry.options["devices"][0]
+    assert device["action"] == "home_connect.start_selected_program"
+    assert "entity_id" not in device
+    assert "{seconds_until_start}" in device["action_data"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

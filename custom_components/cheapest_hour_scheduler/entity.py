@@ -64,7 +64,7 @@ class RecordEntity(SchedulerEntity):
             identifiers={record_device_identifier(entry.entry_id, self._dev_id)},
             name=scheduler.name_of(device),
             manufacturer="rbr101",
-            model=f"Cheapest Hour Scheduler record ({device[CONF_ENTITY_ID]})",
+            model=f"Cheapest Hour Scheduler record ({device.get(CONF_ENTITY_ID) or device.get('action', '')})",
             entry_type=DeviceEntryType.SERVICE,
             via_device=(DOMAIN, entry.entry_id),
         )

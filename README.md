@@ -59,9 +59,11 @@ Open the integration → **Configure** → *Add device*. Each record:
 | Field | Example | Meaning |
 |---|---|---|
 | Description | `Thuisaccu` | Optional. Shown everywhere (device, entities, card, attributes) instead of the entity name. |
-| Entity | `switch.battery_charger` | What to control |
+| Entity | `switch.battery_charger` | What to control. Optional when an *action* is set. |
 | Value at start | `on` | Value set at block start (+ offset) |
-| Value at end | `off` | Optional. Set after the run time. Empty = do nothing. |
+| Value at end | `off` | Optional. Set on the entity after the run time. Empty = do nothing. |
+| Action | `home_connect.start_selected_program` | Optional. Service to call at the start **instead of** setting the entity. Pick it from the list or type it. |
+| Action data | see below | Optional. YAML data for the action. Empty = call it without data. |
 | Ready by | `07:00` | Optional. Time the device must be finished (see below). |
 | Run time (h) | `2` | Optional. Empty = until the end of the block (or the block length when *ready by* is set). |
 | Start offset (min) | `30` | Optional. Start N minutes after the block starts (only without *ready by*). |
@@ -87,14 +89,37 @@ How the value is applied depends on the entity domain:
 | `script` | `on` | `turn_on` |
 | `climate` | `on`/`off` or an HVAC mode | `turn_on`/`turn_off`/`set_hvac_mode` |
 
+#### Action instead of an entity
+Some devices are started with a service call instead of an entity. Fill in **Action** and, if needed, **Action data** (YAML, the part you would put under `data:`). The entity and *value at start* are then not used.
+
+In the data you can use:
+
+| Placeholder | Replaced by |
+|---|---|
+| `{seconds_until_start}` | seconds from now until the planned start (whole minutes) |
+| `{minutes_until_start}` | minutes from now until the planned start |
+
+With a placeholder the action is called **as soon as the start is planned** (like `auto`), so the appliance can delay its own start. Without a placeholder the action is called **at** the start moment.
+
 #### Dishwasher example (Home Connect)
-`number.keuken_dishwasher_start_in_relative` expects the number of seconds until the program starts.
+Home Connect starts a program with a delay through `home_connect.start_selected_program`:
 
-* Entity: `number.keuken_dishwasher_start_in_relative`
-* Value at start: `auto` (or `{seconds_until_start}` if you need it inside a template-like value)
-* Value at end: *(empty)*
+* Description: `Vaatwasser`
+* Action: `home_connect.start_selected_program`
+* Action data:
+  ```yaml
+  device_id: 9c11835a9a1add7e34dbdcf6956e70b8
+  b_s_h_common_option_start_in_relative: {seconds_until_start}
+  ```
+* Ready by: e.g. `07:00`, run time: the program length (recommended, see below)
 
-As soon as a block is planned the integration writes the seconds from *now* until the block start (rounded down to whole minutes). If the plan moves (e.g. when tomorrow's prices arrive) the new value is sent again. After the start moment the value is not touched anymore, the appliance runs its own program. You still need to have the dishwasher in remote-start mode / start the program as usual.
+Find the `device_id` via *Developer tools → Actions*: pick `home_connect.start_selected_program`, select your dishwasher and switch to YAML mode.
+
+As soon as the start is planned, the program is started with the delay until that start (rounded down to whole minutes). After that the integration doesn't touch it anymore; the dishwasher runs its own program. Select the program and enable remote start on the dishwasher as usual.
+
+If the planned start moves (for the shared block this can happen when tomorrow's prices arrive) the action is called again, which Home Connect may refuse while a delayed start is already pending. With **ready by** the start is only fixed once the prices up to that time are known, so it's called once.
+
+Older alternative: if your dishwasher has a `number.<name>_start_in_relative` entity, use that entity with value at start `auto`.
 
 ## How planning works
 
@@ -124,8 +149,8 @@ Every device record also gets **its own device** (listed under the scheduler in 
 | `sensor.<description>_start` | Planned start, with end, ready-by, average price and status as attributes |
 | `sensor.<description>_end` | When the run is expected to be finished |
 | `binary_sensor.<description>_active` | On while this record's run is in progress |
-| `button.<description>_test_start` | **Test**: run the start action right now, to check the device reacts. For `auto` records it sends the seconds until the planned start (or 60 s when nothing is planned). |
-| `button.<description>_test_stop` | **Test**: run the end action right now (only for records with a *value at end*) |
+| `button.<description>_test_start` | **Test**: run the start action (entity value or action) right now, to check the device reacts. With `auto` or `{seconds_until_start}` it sends the seconds until the planned start (or 60 s when nothing is planned). |
+| `button.<description>_test_stop` | **Test**: run the end action right now (only for records with an entity and a *value at end*) |
 
 The test buttons don't change the plan. If the action fails (entity missing, wrong value, device error) you get an error message in the UI.
 

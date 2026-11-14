@@ -1,8 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.4] - 2026-11-14
+
+### Added
+- **Action** per record: call a service at the start instead of setting an entity,
+  e.g. `home_connect.start_selected_program`. Pick it from a searchable list of all
+  actions in your Home Assistant, or type it.
+- **Action data** (YAML) per record, sent with the action. Supports
+  `{seconds_until_start}` and `{minutes_until_start}`; with a placeholder the action
+  is called ahead of time (like `auto`), without one at the start moment. Empty data
+  calls the action without data.
+- Form validation: entity or action required, action must exist, data must be valid YAML.
 
 ### Changed
+- The entity is optional for records with an action. Test start runs the action.
 - README: installation via the **Marketplace** (Settings → Marketplace → Add from link),
   which replaces HACS since Home Assistant 2026.11. HACS steps kept for older versions.
 
