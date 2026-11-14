@@ -40,7 +40,6 @@ from .const import (
     CONF_BLOCK_HOURS,
     CONF_DESCRIPTION,
     CONF_DEVICE_ID,
-    CONF_DEVICES,
     CONF_DURATION,
     CONF_ENTITY_ID,
     CONF_OFF_VALUE,
@@ -54,6 +53,7 @@ from .const import (
     MINUTES_PLACEHOLDER,
     SECONDS_PLACEHOLDER,
     SIGNAL_UPDATE,
+    SUBENTRY_TYPE_RECORD,
 )
 from .planner import (
     Block,
@@ -236,7 +236,18 @@ class CheapestHourScheduler:
         conf = {**entry.data, **entry.options}
         self.price_sensor: str = conf.get(CONF_PRICE_SENSOR, DEFAULT_PRICE_SENSOR)
         self.block_hours: float = float(conf.get(CONF_BLOCK_HOURS, DEFAULT_BLOCK_HOURS))
-        self.devices: list[dict[str, Any]] = list(conf.get(CONF_DEVICES, []))
+        # Device records are config subentries (one per record, editable from the
+        # integration page). The record id stays in the data so stored plans and
+        # entity unique ids survive the move from options to subentries.
+        self.devices: list[dict[str, Any]] = []
+        self.subentry_of: dict[str, str] = {}  # record id -> subentry id
+        for subentry in entry.subentries.values():
+            if subentry.subentry_type != SUBENTRY_TYPE_RECORD:
+                continue
+            device = dict(subentry.data)
+            device.setdefault(CONF_DEVICE_ID, subentry.unique_id or subentry.subentry_id)
+            self.devices.append(device)
+            self.subentry_of[device[CONF_DEVICE_ID]] = subentry.subentry_id
 
         self.enabled = True
         self.block: Block | None = None

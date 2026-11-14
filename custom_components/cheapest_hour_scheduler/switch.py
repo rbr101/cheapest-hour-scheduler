@@ -19,10 +19,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     scheduler: CheapestHourScheduler = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [EnabledSwitch(scheduler, "enabled")]
-        + [RecordEnabledSwitch(scheduler, device) for device in scheduler.devices]
-    )
+    async_add_entities([EnabledSwitch(scheduler, "enabled")])
+    for device in scheduler.devices:
+        async_add_entities(
+            [RecordEnabledSwitch(scheduler, device)],
+            config_subentry_id=scheduler.subentry_of.get(device[CONF_DEVICE_ID]),
+        )
 
 
 class EnabledSwitch(SchedulerEntity, SwitchEntity):

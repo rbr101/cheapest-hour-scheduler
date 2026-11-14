@@ -1,17 +1,27 @@
-"""Config and options flow for Cheapest Hour Scheduler."""
+"""Config flow, options flow and device-record subentry flow."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 import uuid
 
 import voluptuous as vol
+import yaml
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    ConfigSubentryFlow,
+    OptionsFlow,
+    SubentryFlowResult,
+)
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
+from homeassistant.helpers.service import async_get_all_descriptions
 
 from .const import (
     AUTO_VALUE,
@@ -20,7 +30,6 @@ from .const import (
     CONF_BLOCK_HOURS,
     CONF_DESCRIPTION,
     CONF_DEVICE_ID,
-    CONF_DEVICES,
     CONF_DURATION,
     CONF_ENTITY_ID,
     CONF_OFF_VALUE,
@@ -31,8 +40,11 @@ from .const import (
     DEFAULT_BLOCK_HOURS,
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
+    MINUTES_PLACEHOLDER,
+    SECONDS_PLACEHOLDER,
+    SUBENTRY_TYPE_RECORD,
 )
-from .scheduler import render_action_data
+from .scheduler import record_name, render_action_data
 
 DEVICE_DOMAINS = [
     "switch",
@@ -50,6 +62,12 @@ DEVICE_DOMAINS = [
     "climate",
     "water_heater",
 ]
+
+# Shown literally in help texts (curly braces are placeholders in translations).
+TEXT_PLACEHOLDERS = {
+    "seconds_until_start": SECONDS_PLACEHOLDER,
+    "minutes_until_start": MINUTES_PLACEHOLDER,
+}
 
 BLOCK_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(
@@ -71,6 +89,9 @@ def _settings_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+# --------------------------------------------------------------------- helpers
+
+
 def _service_options(hass: HomeAssistant) -> list[str]:
     """All available actions (services) as "domain.service", for the dropdown."""
     return sorted(
@@ -80,15 +101,68 @@ def _service_options(hass: HomeAssistant) -> list[str]:
     )
 
 
-def _device_schema(hass: HomeAssistant) -> vol.Schema:
+def _example_value(example: Any) -> Any:
+    """Like the frontend: parse a string example as JSON-ish YAML, else keep it."""
+    if not isinstance(example, str):
+        return example
+    try:
+        return json.loads(example)
+    except ValueError:
+        pass
+    try:
+        parsed = yaml.safe_load(example)
+    except yaml.YAMLError:
+        return example
+    return parsed if isinstance(parsed, (dict, list)) else example
+
+
+async def async_example_action_data(hass: HomeAssistant, action: str) -> str:
+    """Example data for an action, like "Fill example data" in the developer tools.
+
+    Every field (also the ones in collapsed sections) that has an example in the
+    action's description is filled in. Required fields without an example are
+    added as a commented line so it is clear they still need a value.
+    """
+    domain, _, service = action.partition(".")
+    descriptions = await async_get_all_descriptions(hass)
+    description = (descriptions.get(domain) or {}).get(service) or {}
+
+    example: dict[str, Any] = {}
+    missing: list[str] = []
+
+    def collect(fields: dict[str, Any]) -> None:
+        for key, field in (fields or {}).items():
+            if not isinstance(field, dict):
+                continue
+            if "fields" in field:  # a section
+                collect(field["fields"])
+            elif field.get("example"):  # the frontend skips empty/false examples too
+                example[key] = _example_value(field["example"])
+            elif field.get("required"):
+                missing.append(key)
+
+    collect(description.get("fields") or {})
+
+    lines = [
+        f"# Example data for {action}. Remove what you don't need.",
+        f"# {SECONDS_PLACEHOLDER} / {MINUTES_PLACEHOLDER} = time until the planned start.",
+    ]
+    lines += [f"# {key}:" for key in missing]
+    if example:
+        lines.append(
+            yaml.safe_dump(example, sort_keys=False, allow_unicode=True, default_flow_style=False).rstrip()
+        )
+    return "\n".join(lines) if (example or missing) else ""
+
+
+def _target_schema(hass: HomeAssistant) -> vol.Schema:
+    """Step 1 of a record: what to control (entity and/or action)."""
     return vol.Schema(
         {
             vol.Optional(CONF_DESCRIPTION): selector.TextSelector(),
             vol.Optional(CONF_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=DEVICE_DOMAINS)
             ),
-            vol.Optional(CONF_ON_VALUE, default="on"): selector.TextSelector(),
-            vol.Optional(CONF_OFF_VALUE): selector.TextSelector(),
             vol.Optional(CONF_ACTION): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_service_options(hass),
@@ -96,84 +170,99 @@ def _device_schema(hass: HomeAssistant) -> vol.Schema:
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(CONF_ACTION_DATA): selector.TextSelector(
-                selector.TextSelectorConfig(multiline=True)
-            ),
-            vol.Optional(CONF_READY_BY): selector.TimeSelector(),
-            vol.Optional(CONF_DURATION): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.25, max=24, step=0.25, unit_of_measurement="h",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Optional(CONF_OFFSET, default=0): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=1440, step=15, unit_of_measurement="min",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
         }
     )
 
 
-def _clean_device(user_input: dict[str, Any], dev_id: str | None = None) -> dict[str, Any]:
-    device: dict[str, Any] = {
-        CONF_DEVICE_ID: dev_id or uuid.uuid4().hex[:8],
-        CONF_ON_VALUE: str(user_input.get(CONF_ON_VALUE) or "on").strip(),
-        CONF_OFFSET: float(user_input.get(CONF_OFFSET) or 0),
-    }
-    for key in (CONF_ENTITY_ID, CONF_OFF_VALUE, CONF_DESCRIPTION, CONF_ACTION):
-        if str(user_input.get(key) or "").strip():
-            device[key] = str(user_input[key]).strip()
-    if str(user_input.get(CONF_ACTION_DATA) or "").strip():
-        device[CONF_ACTION_DATA] = str(user_input[CONF_ACTION_DATA]).rstrip()
-    if user_input.get(CONF_DURATION):
-        device[CONF_DURATION] = float(user_input[CONF_DURATION])
-    if user_input.get(CONF_READY_BY):
-        device[CONF_READY_BY] = str(user_input[CONF_READY_BY])
-    return device
+def _details_schema(record: dict[str, Any]) -> vol.Schema:
+    """Step 2 of a record: values / action data and timing."""
+    fields: dict[Any, Any] = {}
+    if record.get(CONF_ACTION):
+        fields[vol.Optional(CONF_ACTION_DATA)] = selector.TextSelector(
+            selector.TextSelectorConfig(multiline=True)
+        )
+    else:
+        fields[vol.Optional(CONF_ON_VALUE, default="on")] = selector.TextSelector()
+    if record.get(CONF_ENTITY_ID):
+        fields[vol.Optional(CONF_OFF_VALUE)] = selector.TextSelector()
+    fields[vol.Optional(CONF_READY_BY)] = selector.TimeSelector()
+    fields[vol.Optional(CONF_DURATION)] = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0.25, max=24, step=0.25, unit_of_measurement="h",
+            mode=selector.NumberSelectorMode.BOX,
+        )
+    )
+    fields[vol.Optional(CONF_OFFSET, default=0)] = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0, max=1440, step=15, unit_of_measurement="min",
+            mode=selector.NumberSelectorMode.BOX,
+        )
+    )
+    return vol.Schema(fields)
 
 
-def _validate_device(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
-    errors: dict[str, str] = {}
+def _validate_target(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
     entity_id = str(user_input.get(CONF_ENTITY_ID) or "").strip()
     action = str(user_input.get(CONF_ACTION) or "").strip()
-
     if not entity_id and not action:
-        errors["base"] = "entity_or_action"
-        return errors
-
+        return {"base": "entity_or_action"}
     if action:
         domain, _, service = action.partition(".")
         if not service or not hass.services.has_service(domain, service):
-            errors[CONF_ACTION] = "unknown_action"
+            return {CONF_ACTION: "unknown_action"}
+    return {}
+
+
+def _validate_details(record: dict[str, Any], user_input: dict[str, Any]) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    if record.get(CONF_ACTION):
         try:
             render_action_data(user_input.get(CONF_ACTION_DATA))
         except HomeAssistantError:
             errors[CONF_ACTION_DATA] = "invalid_data"
-    elif entity_id.split(".", 1)[0] in ("number", "input_number"):
+    elif str(record.get(CONF_ENTITY_ID, "")).split(".", 1)[0] in ("number", "input_number"):
         value = str(user_input.get(CONF_ON_VALUE, "")).strip()
         if value.lower() != AUTO_VALUE and "{" not in value:
             try:
                 float(value)
             except ValueError:
                 errors[CONF_ON_VALUE] = "not_a_number"
-    if user_input.get(CONF_OFF_VALUE) and not entity_id:
-        errors[CONF_OFF_VALUE] = "off_needs_entity"
     return errors
+
+
+def _build_record(target: dict[str, Any], details: dict[str, Any], dev_id: str) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        CONF_DEVICE_ID: dev_id,
+        CONF_ON_VALUE: str(details.get(CONF_ON_VALUE) or "on").strip(),
+        CONF_OFFSET: float(details.get(CONF_OFFSET) or 0),
+    }
+    for key in (CONF_DESCRIPTION, CONF_ENTITY_ID, CONF_ACTION):
+        if str(target.get(key) or "").strip():
+            record[key] = str(target[key]).strip()
+    if record.get(CONF_ENTITY_ID) and str(details.get(CONF_OFF_VALUE) or "").strip():
+        record[CONF_OFF_VALUE] = str(details[CONF_OFF_VALUE]).strip()
+    if record.get(CONF_ACTION) and str(details.get(CONF_ACTION_DATA) or "").strip():
+        record[CONF_ACTION_DATA] = str(details[CONF_ACTION_DATA]).rstrip()
+    if details.get(CONF_DURATION):
+        record[CONF_DURATION] = float(details[CONF_DURATION])
+    if details.get(CONF_READY_BY):
+        record[CONF_READY_BY] = str(details[CONF_READY_BY])
+    return record
+
+
+# ----------------------------------------------------------------- config flow
 
 
 class CheapestHourConfigFlow(ConfigFlow, domain=DOMAIN):
     """Initial setup."""
 
     VERSION = 1
+    MINOR_VERSION = 2  # 1.2: device records are subentries
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             name = user_input.pop(CONF_NAME)
-            return self.async_create_entry(
-                title=name, data=user_input, options={CONF_DEVICES: []}
-            )
+            return self.async_create_entry(title=name, data=user_input, options={})
 
         schema = vol.Schema(
             {vol.Required(CONF_NAME, default="Cheapest hours"): str}
@@ -185,130 +274,100 @@ class CheapestHourConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return CheapestHourOptionsFlow()
 
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        return {SUBENTRY_TYPE_RECORD: RecordSubentryFlow}
+
 
 class CheapestHourOptionsFlow(OptionsFlow):
-    """Manage settings and device records."""
+    """Global settings. Device records are managed on the integration page."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        conf = {**self.config_entry.data, **self.config_entry.options}
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+        return self.async_show_form(step_id="init", data_schema=_settings_schema(conf))
+
+
+# ------------------------------------------------------- device record subentry
+
+
+class RecordSubentryFlow(ConfigSubentryFlow):
+    """Add (user) or edit (reconfigure, the settings icon) one device record."""
 
     def __init__(self) -> None:
-        self._devices: list[dict[str, Any]] | None = None
-        self._settings: dict[str, Any] | None = None
-        self._edit_id: str | None = None
+        self._target: dict[str, Any] = {}
+        self._current: dict[str, Any] = {}
 
-    # helpers ------------------------------------------------------------
-    @property
-    def _conf(self) -> dict[str, Any]:
-        return {**self.config_entry.data, **self.config_entry.options}
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._async_step_target("user", user_input)
 
-    def _get_devices(self) -> list[dict[str, Any]]:
-        if self._devices is None:
-            self._devices = [dict(d) for d in self._conf.get(CONF_DEVICES, [])]
-        return self._devices
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        if not self._current:
+            self._current = dict(self._get_reconfigure_subentry().data)
+        return await self._async_step_target("reconfigure", user_input)
 
-    def _save(self) -> ConfigFlowResult:
-        conf = self._conf
-        data = {
-            CONF_PRICE_SENSOR: conf.get(CONF_PRICE_SENSOR, DEFAULT_PRICE_SENSOR),
-            CONF_BLOCK_HOURS: conf.get(CONF_BLOCK_HOURS, DEFAULT_BLOCK_HOURS),
-            **(self._settings or {}),
-            CONF_DEVICES: self._get_devices(),
-        }
-        return self.async_create_entry(title="", data=data)
-
-    def _device_labels(self) -> list[selector.SelectOptionDict]:
-        labels = []
-        for d in self._get_devices():
-            parts = [d[CONF_DESCRIPTION]] if d.get(CONF_DESCRIPTION) else []
-            target = d.get(CONF_ACTION) or d.get(CONF_ENTITY_ID, "")
-            parts += [f"({target})" if parts else target]
-            if not d.get(CONF_ACTION):
-                parts.append(f"→ {d[CONF_ON_VALUE]}")
-            if d.get(CONF_DURATION):
-                parts.append(f"{d[CONF_DURATION]:g} h")
-            if d.get(CONF_READY_BY):
-                parts.append(f"klaar om {str(d[CONF_READY_BY])[:5]}")
-            if d.get(CONF_OFFSET):
-                parts.append(f"+{d[CONF_OFFSET]:g} min")
-            labels.append(selector.SelectOptionDict(value=d[CONF_DEVICE_ID], label=" ".join(parts)))
-        return labels
-
-    # steps --------------------------------------------------------------
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        menu = ["settings", "add_device"]
-        if self._get_devices():
-            menu += ["edit_device", "remove_device"]
-        menu.append("finish")
-        return self.async_show_menu(step_id="init", menu_options=menu)
-
-    async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return self._save()
-
-    async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            self._settings = user_input
-            return self._save()
-        return self.async_show_form(step_id="settings", data_schema=_settings_schema(self._conf))
-
-    async def async_step_add_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def _async_step_target(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = _validate_device(self.hass, user_input)
+            errors = _validate_target(self.hass, user_input)
             if not errors:
-                self._get_devices().append(_clean_device(user_input))
-                return self._save()
+                self._target = user_input
+                return await self.async_step_details()
         return self.async_show_form(
-            step_id="add_device",
-            data_schema=self.add_suggested_values_to_schema(_device_schema(self.hass), user_input or {}),
-            errors=errors,
-        )
-
-    async def async_step_edit_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            self._edit_id = user_input[CONF_DEVICE_ID]
-            return await self.async_step_edit_device_form()
-        return self.async_show_form(
-            step_id="edit_device",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DEVICE_ID): selector.SelectSelector(
-                        selector.SelectSelectorConfig(options=self._device_labels())
-                    )
-                }
+            step_id=step_id,
+            data_schema=self.add_suggested_values_to_schema(
+                _target_schema(self.hass), user_input or self._current
             ),
+            errors=errors,
+            description_placeholders=TEXT_PLACEHOLDERS,
         )
 
-    async def async_step_edit_device_form(
+    async def async_step_details(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        devices = self._get_devices()
-        current = next(d for d in devices if d[CONF_DEVICE_ID] == self._edit_id)
+    ) -> SubentryFlowResult:
+        target = self._target
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = _validate_device(self.hass, user_input)
+            errors = _validate_details(target, user_input)
             if not errors:
-                devices[devices.index(current)] = _clean_device(user_input, self._edit_id)
-                return self._save()
+                return self._async_save(user_input)
+
+        suggested = dict(user_input or self._current)
+        action = str(target.get(CONF_ACTION) or "").strip()
+        if user_input is None and action:
+            same_action = action == self._current.get(CONF_ACTION)
+            if not (same_action and self._current.get(CONF_ACTION_DATA)):
+                # New (or changed) action: start from the action's example data.
+                suggested[CONF_ACTION_DATA] = await async_example_action_data(self.hass, action)
+
         return self.async_show_form(
-            step_id="edit_device_form",
-            data_schema=self.add_suggested_values_to_schema(_device_schema(self.hass), user_input or current),
+            step_id="details",
+            data_schema=self.add_suggested_values_to_schema(_details_schema(target), suggested),
             errors=errors,
+            description_placeholders={
+                **TEXT_PLACEHOLDERS,
+                "target": record_name(self.hass, target),
+            },
         )
 
-    async def async_step_remove_device(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            remove = set(user_input.get(CONF_DEVICES, []))
-            self._devices = [d for d in self._get_devices() if d[CONF_DEVICE_ID] not in remove]
-            return self._save()
-        return self.async_show_form(
-            step_id="remove_device",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DEVICES): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=self._device_labels(), multiple=True
-                        )
-                    )
-                }
-            ),
+    def _async_save(self, details: dict[str, Any]) -> SubentryFlowResult:
+        if self.source == "reconfigure":
+            subentry = self._get_reconfigure_subentry()
+            dev_id = subentry.data.get(CONF_DEVICE_ID) or subentry.unique_id or subentry.subentry_id
+            record = _build_record(self._target, details, dev_id)
+            return self.async_update_and_abort(
+                self._get_entry(), subentry, data=record, title=record_name(self.hass, record)
+            )
+        dev_id = uuid.uuid4().hex[:8]
+        record = _build_record(self._target, details, dev_id)
+        return self.async_create_entry(
+            title=record_name(self.hass, record), data=record, unique_id=dev_id
         )

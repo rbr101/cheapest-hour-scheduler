@@ -53,8 +53,20 @@ Copy `custom_components/cheapest_hour_scheduler` to `<config>/custom_components/
 
 You can add the integration several times, e.g. a 1-hour block for the dishwasher and a 4-hour block for the battery.
 
+To change the price sensor or block length later: open the integration → **Configure**.
+
 ### Device records
-Open the integration → **Configure** → *Add device*. Each record:
+Device records are managed on the integration page (*Settings → Devices & services → Cheapest Hour Scheduler*):
+
+* **Add device** adds a record.
+* Every record has its own row with a **settings icon** (⚙️) to edit it, and a ⋮ menu to delete it.
+
+Adding or editing takes two steps:
+
+1. **What to switch**: description, entity and/or action.
+2. **Details**: the values (for an entity) or the action data (for an action), plus ready by, run time and offset. For an action, the data is pre-filled with the action's example data (see below).
+
+Each record:
 
 | Field | Example | Meaning |
 |---|---|---|
@@ -91,6 +103,8 @@ How the value is applied depends on the entity domain:
 
 #### Action instead of an entity
 Some devices are started with a service call instead of an entity. Fill in **Action** and, if needed, **Action data** (YAML, the part you would put under `data:`). The entity and *value at start* are then not used.
+
+When you pick an action, the data field is **pre-filled with the action's example data**, the same as *Developer tools → Actions → Fill example data*: every field that has an example, also the ones in collapsed sections. Required fields without an example (such as `device_id`) are added as a commented line, e.g. `# device_id:`. Remove what you don't need and fill in the rest. When you edit a record and keep the same action, your own data is kept.
 
 In the data you can use:
 
@@ -154,7 +168,7 @@ Every device record also gets **its own device** (listed under the scheduler in 
 
 The test buttons don't change the plan. If the action fails (entity missing, wrong value, device error) you get an error message in the UI.
 
-Removing a record in the options also removes its device.
+Deleting a record on the integration page also removes its device and entities.
 
 ## Lovelace card
 

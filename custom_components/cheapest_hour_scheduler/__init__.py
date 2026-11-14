@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from types import MappingProxyType
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket
-from .const import CONF_DEVICE_ID, DOMAIN, PLATFORMS
+from .const import CONF_DEVICE_ID, CONF_DEVICES, DOMAIN, PLATFORMS, SUBENTRY_TYPE_RECORD
 from .entity import record_device_identifier
-from .scheduler import CheapestHourScheduler
+from .scheduler import CheapestHourScheduler, record_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,11 +52,41 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         _LOGGER.warning("Could not register the Lovelace card: %s", err)
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate older config entries.
+
+    1.1 -> 1.2: device records move from options["devices"] to config subentries,
+    so each record gets its own row (with a settings icon) on the integration page.
+    The record id is kept, so entities, devices and stored plans stay the same.
+    """
+    if entry.version > 1:
+        return False  # downgrade from a future version
+    if entry.version == 1 and entry.minor_version < 2:
+        options = dict(entry.options)
+        existing = {sub.unique_id for sub in entry.subentries.values()}
+        for device in options.pop(CONF_DEVICES, []) or []:
+            if device.get(CONF_DEVICE_ID) in existing:
+                continue
+            hass.config_entries.async_add_subentry(
+                entry,
+                ConfigSubentry(
+                    data=MappingProxyType(dict(device)),
+                    subentry_type=SUBENTRY_TYPE_RECORD,
+                    title=record_name(hass, device),
+                    unique_id=device.get(CONF_DEVICE_ID),
+                ),
+            )
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+        _LOGGER.info("Moved device records of %s to subentries", entry.title)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up from a config entry."""
     scheduler = CheapestHourScheduler(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = scheduler
     _remove_stale_record_devices(hass, entry, scheduler)
+    _link_record_devices_to_subentries(hass, entry, scheduler)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await scheduler.async_start()
@@ -67,7 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def _remove_stale_record_devices(
     hass: HomeAssistant, entry: ConfigEntry, scheduler: CheapestHourScheduler
 ) -> None:
-    """Remove devices of records that were deleted in the options."""
+    """Remove devices of records that no longer exist."""
     registry = dr.async_get(hass)
     keep = {(DOMAIN, entry.entry_id)} | {
         record_device_identifier(entry.entry_id, d[CONF_DEVICE_ID]) for d in scheduler.devices
@@ -75,6 +106,28 @@ def _remove_stale_record_devices(
     for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
         if not device.identifiers & keep:
             registry.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+
+
+def _link_record_devices_to_subentries(
+    hass: HomeAssistant, entry: ConfigEntry, scheduler: CheapestHourScheduler
+) -> None:
+    """Attach record devices created before 0.7 to their subentry."""
+    registry = dr.async_get(hass)
+    for dev_id, subentry_id in scheduler.subentry_of.items():
+        device = registry.async_get_device(
+            identifiers={record_device_identifier(entry.entry_id, dev_id)}
+        )
+        if device is None:
+            continue
+        subentries = device.config_entries_subentries.get(entry.entry_id, set())
+        if subentry_id not in subentries:
+            registry.async_update_device(
+                device.id, add_config_entry_id=entry.entry_id, add_config_subentry_id=subentry_id
+            )
+        if None in subentries:
+            registry.async_update_device(
+                device.id, remove_config_entry_id=entry.entry_id, remove_config_subentry_id=None
+            )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

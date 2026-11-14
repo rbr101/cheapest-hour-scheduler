@@ -26,9 +26,12 @@ async def async_setup_entry(
             BlockEndSensor(scheduler, "block_end"),
             BlockPriceSensor(scheduler, "block_average_price"),
         ]
-        + [RecordStartSensor(scheduler, device) for device in scheduler.devices]
-        + [RecordEndSensor(scheduler, device) for device in scheduler.devices]
     )
+    for device in scheduler.devices:
+        async_add_entities(
+            [RecordStartSensor(scheduler, device), RecordEndSensor(scheduler, device)],
+            config_subentry_id=scheduler.subentry_of.get(device[CONF_DEVICE_ID]),
+        )
 
 
 class BlockStartSensor(SchedulerEntity, SensorEntity):

@@ -4,7 +4,8 @@ DOMAIN = "cheapest_hour_scheduler"
 
 CONF_PRICE_SENSOR = "price_sensor"
 CONF_BLOCK_HOURS = "block_hours"
-CONF_DEVICES = "devices"
+CONF_DEVICES = "devices"  # legacy: records were stored in options before 0.7
+SUBENTRY_TYPE_RECORD = "record"  # each device record is a config subentry
 
 # Device record keys
 CONF_DEVICE_ID = "id"

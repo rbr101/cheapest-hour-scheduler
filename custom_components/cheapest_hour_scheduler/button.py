@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .const import CONF_DEVICE_ID, CONF_OFF_VALUE
+from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, CONF_OFF_VALUE
 from .entity import RecordEntity, SchedulerEntity
 from .scheduler import CheapestHourScheduler
 
@@ -17,12 +17,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     scheduler: CheapestHourScheduler = hass.data[DOMAIN][entry.entry_id]
-    entities: list[ButtonEntity] = [ReplanButton(scheduler, "replan")]
+    async_add_entities([ReplanButton(scheduler, "replan")])
     for device in scheduler.devices:
-        entities.append(RecordTestButton(scheduler, device, "start"))
-        if str(device.get(CONF_OFF_VALUE) or "").strip():
+        entities: list[ButtonEntity] = [RecordTestButton(scheduler, device, "start")]
+        if str(device.get(CONF_OFF_VALUE) or "").strip() and device.get(CONF_ENTITY_ID):
             entities.append(RecordTestButton(scheduler, device, "stop"))
-    async_add_entities(entities)
+        async_add_entities(
+            entities, config_subentry_id=scheduler.subentry_of.get(device[CONF_DEVICE_ID])
+        )
 
 
 class ReplanButton(SchedulerEntity, ButtonEntity):

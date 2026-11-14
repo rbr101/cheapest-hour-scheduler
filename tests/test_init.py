@@ -8,6 +8,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
@@ -19,6 +20,36 @@ def _prices(start, values):
         {"time": (start + timedelta(minutes=15 * i)).isoformat(), "price": v}
         for i, v in enumerate(values)
     ]
+
+
+def _mock_entry(*, options=None, **kwargs):
+    """Config entry with the given device records as subentries (format 1.2)."""
+    options = dict(options or {})
+    devices = options.pop("devices", [])
+    return MockConfigEntry(
+        minor_version=2,
+        options=options,
+        subentries_data=[
+            ConfigSubentryData(
+                data=d, subentry_type="record", title=d.get("name") or d["id"], unique_id=d["id"]
+            )
+            for d in devices
+        ],
+        **kwargs,
+    )
+
+
+async def _subentry_flow(hass, entry, target, details, subentry_id=None):
+    """Run the add (or, with subentry_id, edit) flow of a device record."""
+    context = {"source": "reconfigure", "subentry_id": subentry_id} if subentry_id else {"source": "user"}
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "record"), context=context)
+    assert result["type"] == "form"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], target)
+    if result.get("step_id") != "details":
+        return result, None
+    form = result
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], details)
+    return result, form
 
 
 async def test_schedules_devices(hass, freezer):
@@ -39,7 +70,7 @@ async def test_schedules_devices(hass, freezer):
     )
     await hass.async_block_till_done()
 
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -93,34 +124,51 @@ async def test_config_flow(hass):
     entry = result["result"]
     await hass.async_block_till_done()
 
-    # Add a device through the options flow
-    hass.states.async_set("number.keuken_dishwasher_start_in_relative", "0")
+    # Options only hold the global settings now
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] == "menu"
+    assert result["type"] == "form" and result["step_id"] == "init"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "add_device"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {"entity_id": "number.keuken_dishwasher_start_in_relative", "on_value": "auto", "start_offset_minutes": 0},
+        result["flow_id"], {"price_sensor": "sensor.zonneplan_current_tariff_rounded", "block_hours": 3}
     )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
-    devices = entry.options["devices"]
-    assert devices[0]["entity_id"] == "number.keuken_dishwasher_start_in_relative"
-    assert devices[0]["on_value"] == "auto"
-    assert entry.options["block_hours"] == 2
+    assert entry.options["block_hours"] == 3
+
+    # Add a device record from the integration page ("Add device" -> subentry)
+    hass.states.async_set("number.keuken_dishwasher_start_in_relative", "0")
+    result, _form = await _subentry_flow(
+        hass, entry,
+        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative"},
+        {"on_value": "auto", "start_offset_minutes": 0},
+    )
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    (subentry,) = entry.subentries.values()
+    assert subentry.title == "Vaatwasser"
+    assert subentry.data["entity_id"] == "number.keuken_dishwasher_start_in_relative"
+    assert subentry.data["on_value"] == "auto"
+    assert hass.states.get("sensor.vaatwasser_start") is not None
 
     # Invalid number value is rejected
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "add_device"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {"entity_id": "number.keuken_dishwasher_start_in_relative", "on_value": "soon", "start_offset_minutes": 0},
+    result, _form = await _subentry_flow(
+        hass, entry,
+        {"entity_id": "number.keuken_dishwasher_start_in_relative"},
+        {"on_value": "soon", "start_offset_minutes": 0},
     )
     assert result["errors"] == {"on_value": "not_a_number"}
+
+    # Edit it with the settings icon (reconfigure): change the run time
+    result, form = await _subentry_flow(
+        hass, entry,
+        {"name": "Vaatwasser", "entity_id": "number.keuken_dishwasher_start_in_relative"},
+        {"on_value": "auto", "duration_hours": 2, "start_offset_minutes": 0},
+        subentry_id=subentry.subentry_id,
+    )
+    assert result["type"] == "abort" and result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    subentry = entry.subentries[subentry.subentry_id]
+    assert subentry.data["duration_hours"] == 2
+    assert subentry.data["id"] == subentry.unique_id  # record id is kept
 
 
 async def test_ready_by_gets_own_window(hass):
@@ -143,7 +191,7 @@ async def test_ready_by_gets_own_window(hass):
     await hass.async_block_till_done()
     ready = dt_util.as_local(slot0 + timedelta(hours=6)).strftime("%H:%M:00")
 
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -175,7 +223,7 @@ async def test_uses_stored_prices_when_sensor_unavailable(hass, hass_storage, fr
         "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
     )
     assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -216,7 +264,7 @@ async def test_websocket_plan(hass, hass_ws_client):
         "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
     )
     assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -252,7 +300,7 @@ async def test_record_description_device_and_switch(hass, freezer):
         "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
     )
     assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -296,7 +344,8 @@ async def test_record_description_device_and_switch(hass, freezer):
     assert hass.states.get("input_boolean.charger").state == "on"
 
     # Removing the record removes its device
-    hass.config_entries.async_update_entry(entry, options={"devices": []})
+    (subentry_id,) = entry.subentries
+    hass.config_entries.async_remove_subentry(entry, subentry_id)
     await hass.async_block_till_done()
     assert registry.async_get_device(identifiers={(DOMAIN, f"{entry.entry_id}_a")}) is None
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -315,7 +364,7 @@ async def test_record_test_buttons(hass):
     assert await async_setup_component(
         hass, "input_number", {"input_number": {"dishwasher": {"min": 0, "max": 86400, "step": 60}}}
     )
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -369,7 +418,7 @@ async def test_record_with_action(hass, freezer):
     hass.states.async_set(
         "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
     )
-    entry = MockConfigEntry(
+    entry = _mock_entry(
         domain=DOMAIN,
         title="Test",
         data={"price_sensor": "sensor.price", "block_hours": 1},
@@ -410,38 +459,122 @@ async def test_record_with_action(hass, freezer):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_options_flow_action_validation(hass):
+async def test_record_flow_action_and_example_data(hass):
+    from homeassistant.helpers import service as service_helper
+
     hass.services.async_register("home_connect", "start_selected_program", lambda call: None)
-    entry = MockConfigEntry(
-        domain=DOMAIN, title="Test",
-        data={"price_sensor": "sensor.price", "block_hours": 1}, options={"devices": []},
-    )
+    service_helper.async_set_service_schema(hass, "home_connect", "start_selected_program", {
+        "fields": {
+            "device_id": {"required": True, "selector": {"device": {}}},
+            "affects_to": {"example": "selected_program", "selector": {"text": {}}},
+            "dish_washer_options": {
+                "collapsed": True,
+                "fields": {
+                    "b_s_h_common_option_start_in_relative": {"example": 3600, "selector": {"number": {}}},
+                    "dishcare_dishwasher_option_extra_dry": {"example": False, "selector": {"boolean": {}}},
+                },
+            },
+        }
+    })
+    entry = _mock_entry(domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    async def add(user_input):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
-        result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "add_device"})
-        return await hass.config_entries.options.async_configure(result["flow_id"], user_input)
-
-    result = await add({"on_value": "on", "start_offset_minutes": 0})
+    # Step 1 validation
+    result, _ = await _subentry_flow(hass, entry, {"name": "Leeg"}, {})
     assert result["errors"] == {"base": "entity_or_action"}
-    result = await add({"action": "home_connect.nope", "start_offset_minutes": 0})
+    result, _ = await _subentry_flow(hass, entry, {"action": "home_connect.nope"}, {})
     assert result["errors"] == {"action": "unknown_action"}
-    result = await add({"action": "home_connect.start_selected_program", "action_data": "- a\n- b", "start_offset_minutes": 0})
-    assert result["errors"] == {"action_data": "invalid_data"}
 
-    result = await add({
-        "name": "Vaatwasser",
-        "action": "home_connect.start_selected_program",
-        "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}",
-        "start_offset_minutes": 0,
-    })
+    # Step 2 is pre-filled with the example data, like "Fill example data"
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "record"), context={"source": "user"})
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Vaatwasser", "action": "home_connect.start_selected_program"}
+    )
+    assert result["step_id"] == "details"
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if k == "action_data")
+    example = key.description["suggested_value"]
+    assert "affects_to: selected_program" in example
+    assert "b_s_h_common_option_start_in_relative: 3600" in example  # from a collapsed section
+    assert "extra_dry" not in example  # false examples are skipped, like the frontend
+    assert "# device_id:" in example  # required without example: hint
+    assert "on_value" not in schema and "off_value" not in schema
+
+    # Invalid YAML is rejected, valid data is saved
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"action_data": "- a\n- b", "start_offset_minutes": 0}
+    )
+    assert result["errors"] == {"action_data": "invalid_data"}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {"action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}",
+         "start_offset_minutes": 0},
+    )
     assert result["type"] == "create_entry"
     await hass.async_block_till_done()
-    device = entry.options["devices"][0]
-    assert device["action"] == "home_connect.start_selected_program"
-    assert "entity_id" not in device
-    assert "{seconds_until_start}" in device["action_data"]
+    (subentry,) = entry.subentries.values()
+    assert subentry.data["action"] == "home_connect.start_selected_program"
+    assert "entity_id" not in subentry.data
+    assert "{seconds_until_start}" in subentry.data["action_data"]
+
+    # Editing keeps the own data (no example over it) as long as the action is the same
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "record"), context={"source": "reconfigure", "subentry_id": subentry.subentry_id}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Vaatwasser", "action": "home_connect.start_selected_program"}
+    )
+    key = next(k for k in result["data_schema"].schema if k == "action_data")
+    assert key.description["suggested_value"].startswith("device_id: abc")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_migrates_records_from_options(hass, freezer):
+    """Records stored in options (before 0.7) become subentries, ids are kept."""
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    hass.states.async_set(
+        "sensor.price", "0.6",
+        {"prices_today": _prices(slot0, [0.6] * 8 + [0.2] * 4 + [0.6] * 20), "prices_tomorrow": []},
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Test", version=1, minor_version=1,
+        data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"block_hours": 1, "devices": [
+            {"id": "a1b2c3d4", "name": "Thuisaccu", "entity_id": "input_boolean.charger",
+             "on_value": "on", "off_value": "off"},
+        ]},
+    )
+    entry.add_to_hass(hass)
+
+    # As left behind by 0.6: device and entity exist, without a subentry
+    from homeassistant.helpers import device_registry as dr, entity_registry as er
+    old_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, f"{entry.entry_id}_a1b2c3d4")}, name="Thuisaccu"
+    )
+    er.async_get(hass).async_get_or_create(
+        "switch", DOMAIN, f"{entry.entry_id}_device_a1b2c3d4_enabled",
+        config_entry=entry, device_id=old_device.id, suggested_object_id="thuisaccu_enabled",
+    )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.minor_version == 2
+    assert "devices" not in entry.options
+    (subentry,) = entry.subentries.values()
+    assert subentry.subentry_type == "record"
+    assert subentry.unique_id == "a1b2c3d4"
+    assert subentry.title == "Thuisaccu"
+
+    reg = er.async_get(hass).async_get("switch.thuisaccu_enabled")
+    assert reg.unique_id == f"{entry.entry_id}_device_a1b2c3d4_enabled"
+    assert reg.config_subentry_id == subentry.subentry_id
+
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, f"{entry.entry_id}_a1b2c3d4")})
+    assert device.id == old_device.id  # same device, history kept
+    assert device.config_entries_subentries[entry.entry_id] == {subentry.subentry_id}
     assert await hass.config_entries.async_unload(entry.entry_id)

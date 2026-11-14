@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.0] - 2026-11-14
+
+### Changed
+- **Device records are now managed on the integration page** (config subentries):
+  an **Add device** button, and every record has its own row with a settings icon to
+  edit it and a menu to delete it. *Configure* now only holds the global settings
+  (price sensor, block length).
+- Adding/editing a record takes two steps: what to switch (description, entity and/or
+  action), then the details. Fields that don't apply are no longer shown.
+- Existing records are migrated automatically. Record ids, entities, devices, history
+  and stored plans are kept.
+- Requires Home Assistant 2025.6 or newer.
+
+### Added
+- When you pick an action, the action data is **pre-filled with the action's example
+  data**, like *Fill example data* in the developer tools (all fields with an example,
+  also in collapsed sections). Required fields without an example are added as a
+  commented hint. Editing a record with the same action keeps your own data.
+
 ## [0.6.4] - 2026-11-14
 
 ### Added

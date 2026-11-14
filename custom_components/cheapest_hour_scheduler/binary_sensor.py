@@ -19,10 +19,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     scheduler: CheapestHourScheduler = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [BlockActiveSensor(scheduler, "block_active")]
-        + [RecordActiveSensor(scheduler, device) for device in scheduler.devices]
-    )
+    async_add_entities([BlockActiveSensor(scheduler, "block_active")])
+    for device in scheduler.devices:
+        async_add_entities(
+            [RecordActiveSensor(scheduler, device)],
+            config_subentry_id=scheduler.subentry_of.get(device[CONF_DEVICE_ID]),
+        )
 
 
 class BlockActiveSensor(SchedulerEntity, BinarySensorEntity):

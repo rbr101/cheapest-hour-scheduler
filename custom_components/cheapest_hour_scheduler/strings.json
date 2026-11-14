@@ -19,17 +19,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Cheapest Hour Scheduler",
-        "menu_options": {
-          "settings": "Settings (price sensor, block length)",
-          "add_device": "Add device",
-          "edit_device": "Edit device",
-          "remove_device": "Remove device",
-          "finish": "Close"
-        }
-      },
-      "settings": {
-        "title": "Settings (price sensor, block length)",
+        "title": "Settings",
+        "description": "Price sensor and block length. Add, edit or remove devices on the integration page.",
         "data": {
           "price_sensor": "Price sensor",
           "block_hours": "Block length (hours)"
@@ -38,78 +29,75 @@
           "price_sensor": "Sensor with prices_today and prices_tomorrow attributes, e.g. sensor.zonneplan_current_tariff_rounded",
           "block_hours": "Length of the cheapest consecutive block. Quarters are allowed (e.g. 2.5)."
         }
-      },
-      "add_device": {
-        "title": "Add device",
-        "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
-        "data": {
-          "name": "Description",
-          "entity_id": "Entity",
-          "on_value": "Value at start",
-          "off_value": "Value at end (optional)",
-          "action": "Action (optional)",
-          "action_data": "Action data (YAML, optional)",
-          "duration_hours": "Run time (hours, optional)",
-          "start_offset_minutes": "Start offset (minutes)",
-          "ready_by": "Ready by (optional)"
-        },
-        "data_description": {
-          "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
-          "entity_id": "switch, number, select, button, script, … Optional when an action is set.",
-          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative. Not used when an action is set.",
-          "off_value": "Usually 'off'. Leave empty to do nothing at the end. Needs an entity.",
-          "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program. Leave empty to set the entity.",
-          "action_data": "Data for the action as YAML. Use {seconds_until_start} (or {minutes_until_start}) for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = no data.",
-          "duration_hours": "How long it must stay on. Empty = until the end of the block.",
-          "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
-          "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
-        }
-      },
-      "edit_device": {
-        "title": "Edit device",
-        "data": {
-          "id": "Device"
-        }
-      },
-      "edit_device_form": {
-        "title": "Edit device",
-        "description": "Without 'ready by' the device follows the shared cheapest block (plus offset). With 'ready by' it gets its own cheapest window that finishes in time.",
-        "data": {
-          "name": "Description",
-          "entity_id": "Entity",
-          "on_value": "Value at start",
-          "off_value": "Value at end (optional)",
-          "action": "Action (optional)",
-          "action_data": "Action data (YAML, optional)",
-          "duration_hours": "Run time (hours, optional)",
-          "start_offset_minutes": "Start offset (minutes)",
-          "ready_by": "Ready by (optional)"
-        },
-        "data_description": {
-          "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
-          "entity_id": "switch, number, select, button, script, … Optional when an action is set.",
-          "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start, e.g. for number.keuken_dishwasher_start_in_relative. Not used when an action is set.",
-          "off_value": "Usually 'off'. Leave empty to do nothing at the end. Needs an entity.",
-          "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program. Leave empty to set the entity.",
-          "action_data": "Data for the action as YAML. Use {seconds_until_start} (or {minutes_until_start}) for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = no data.",
-          "duration_hours": "How long it must stay on. Empty = until the end of the block.",
-          "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by').",
-          "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block."
-        }
-      },
-      "remove_device": {
-        "title": "Remove device",
-        "data": {
-          "devices": "Devices to remove"
-        }
       }
-    },
-    "error": {
-      "not_a_number": "Enter a number, or 'auto' for seconds until start.",
-      "entity_or_action": "Choose an entity or an action.",
-      "unknown_action": "This action does not exist.",
-      "invalid_data": "The data is not valid YAML with key: value pairs.",
-      "off_needs_entity": "A value at end needs an entity."
+    }
+  },
+  "config_subentries": {
+    "record": {
+      "initiate_flow": {
+        "user": "Add device",
+        "reconfigure": "Edit device"
+      },
+      "entry_type": "Device",
+      "step": {
+        "user": {
+          "title": "Add device",
+          "description": "What should be switched: an entity, or an action (service). Without 'ready by' the device follows the shared cheapest block; with 'ready by' it gets its own window.",
+          "data": {
+            "name": "Description",
+            "entity_id": "Entity",
+            "action": "Action (optional)"
+          },
+          "data_description": {
+            "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
+            "entity_id": "switch, number, select, button, script, … Leave empty when you use an action.",
+            "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit device",
+          "description": "What should be switched: an entity, or an action (service). Without 'ready by' the device follows the shared cheapest block; with 'ready by' it gets its own window.",
+          "data": {
+            "name": "Description",
+            "entity_id": "Entity",
+            "action": "Action (optional)"
+          },
+          "data_description": {
+            "name": "Shown everywhere instead of the entity name, e.g. 'Dishwasher'.",
+            "entity_id": "switch, number, select, button, script, … Leave empty when you use an action.",
+            "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program."
+          }
+        },
+        "details": {
+          "title": "Details for {target}",
+          "description": "With an action the data is pre-filled with the action's example data (like 'Fill example data' in the developer tools). Remove what you don't need.",
+          "data": {
+            "action_data": "Action data (YAML, optional)",
+            "on_value": "Value at start",
+            "off_value": "Value at end (optional)",
+            "ready_by": "Ready by (optional)",
+            "duration_hours": "Run time (hours, optional)",
+            "start_offset_minutes": "Start offset (minutes)"
+          },
+          "data_description": {
+            "action_data": "YAML data for the action (what goes under data:). Use {seconds_until_start} or {minutes_until_start} for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = call without data.",
+            "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start.",
+            "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
+            "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block.",
+            "duration_hours": "How long it must stay on. Empty = until the end of the block.",
+            "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by')."
+          }
+        }
+      },
+      "error": {
+        "not_a_number": "Enter a number, or 'auto' for seconds until start.",
+        "entity_or_action": "Choose an entity or an action.",
+        "unknown_action": "This action does not exist.",
+        "invalid_data": "The data is not valid YAML with key: value pairs."
+      },
+      "abort": {
+        "reconfigure_successful": "Device saved."
+      }
     }
   },
   "entity": {
