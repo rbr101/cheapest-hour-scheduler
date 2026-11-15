@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, CONF_READY_BY, DOMAIN
@@ -24,8 +24,12 @@ def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
     """Everything the card needs for one config entry."""
     now = dt_util.utcnow()
     devices = []
+    registry = dr.async_get(hass)
     for device in scheduler.devices:
         dev_id = device[CONF_DEVICE_ID]
+        reg_device = registry.async_get_device(
+            identifiers={(DOMAIN, f"{scheduler.entry.entry_id}_{dev_id}")}
+        )
         plan = scheduler.device_plans.get(dev_id)
         item: dict[str, Any] = {
             "id": dev_id,
@@ -34,6 +38,10 @@ def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
             "enabled": scheduler.is_record_enabled(dev_id),
             "ready_by": device.get(CONF_READY_BY),
             "waiting": scheduler.waiting.get(dev_id),
+            "device_id": reg_device.id if reg_device else None,
+            # the record's settings, for the details panel of the card
+            "record": {k: v for k, v in device.items() if k not in (CONF_DEVICE_ID, "name")},
+            "last_action": scheduler.last_actions.get(dev_id),
             "plan": None,
         }
         if plan:

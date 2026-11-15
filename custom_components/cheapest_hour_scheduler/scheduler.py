@@ -73,7 +73,7 @@ STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
 TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
 # A new or edited plan never starts in the past: at the earliest this long from now.
-START_DELAY = timedelta(minutes=2)
+START_DELAY = timedelta(minutes=5)
 PRICE_CACHE_KEEP = timedelta(days=1)
 # The shared block runs at most once a day: the next one starts at least this
 # long after the previous one started (gives some room to move within the day).
@@ -279,6 +279,8 @@ class CheapestHourScheduler:
         self.price_source: str = "none"  # "sensor", "cache" or "none"
         self._last_block_start: datetime | None = None  # last finished shared block
         self.record_enabled: dict[str, bool] = {}  # dev_id -> on/off (default on)
+        # dev_id -> what was last sent to the device and whether that worked
+        self.last_actions: dict[str, dict[str, Any]] = {}
         self.last_planned: datetime | None = None
         self.last_error: str | None = None
 
@@ -323,6 +325,7 @@ class CheapestHourScheduler:
         self.record_enabled = {
             k: bool(v) for k, v in (stored.get("record_enabled") or {}).items()
         }
+        self.last_actions = dict(stored.get("last_actions") or {})
         if stored.get("last_block_start"):
             self._last_block_start = dt_util.parse_datetime(stored["last_block_start"])
 
@@ -354,6 +357,7 @@ class CheapestHourScheduler:
             ],
         }
         data["record_enabled"] = self.record_enabled
+        data["last_actions"] = self.last_actions
         if self._last_block_start:
             data["last_block_start"] = self._last_block_start.isoformat()
         if self.block:
@@ -624,7 +628,7 @@ class CheapestHourScheduler:
         adding or editing a record, or when the cheapest hours are right now).
         Starting a little later makes sure the device really gets its start.
         """
-        earliest = (now + START_DELAY).replace(second=0, microsecond=0) + timedelta(minutes=1)
+        earliest = now.replace(second=0, microsecond=0) + START_DELAY
         if plan.start >= earliest or plan.run_end <= now:
             return
         device = plan.device
@@ -724,7 +728,22 @@ class CheapestHourScheduler:
         except Exception as err:  # noqa: BLE001 - never break the scheduler
             self.last_error = f"{self.name_of(device)}: {err}"
             _LOGGER.error("Start of %s failed: %s", self.name_of(device), err)
+            self._log_action(device, "start", summary, err)
+        else:
+            self._log_action(device, "start", summary)
         return summary
+
+    def _log_action(
+        self, device: dict[str, Any], what: str, sent: str, error: Exception | None = None
+    ) -> None:
+        """Remember the last thing sent to a record's device (shown in the card)."""
+        self.last_actions[device[CONF_DEVICE_ID]] = {
+            "time": dt_util.utcnow().isoformat(),
+            "what": what,
+            "sent": sent,
+            "ok": error is None,
+            "error": str(error) if error else None,
+        }
 
     async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
         # Sent once per planned start moment, also when it fails (no retry storm).
@@ -765,6 +784,7 @@ class CheapestHourScheduler:
         if device is None:
             raise HomeAssistantError("Unknown record")
         name = self.name_of(device)
+        value = ""
         try:
             if action == "stop":
                 value = self.test_value(dev_id, "stop")
@@ -777,9 +797,12 @@ class CheapestHourScheduler:
                 await run()
         except Exception as err:
             self.last_error = f"test {name}: {err}"
+            self._log_action(device, f"test {action}", value or "error", err)
             self._notify()
             raise HomeAssistantError(f"Test {action} of {name} failed: {err}") from err
         _LOGGER.info("Test %s of %s: %s", action, name, value)
+        self._log_action(device, f"test {action}", value)
+        self._notify()
         return value
 
     async def _run_start(self, plan: DevicePlan) -> None:
@@ -790,7 +813,14 @@ class CheapestHourScheduler:
         off_value = plan.device.get(CONF_OFF_VALUE)
         entity_id = plan.device.get(CONF_ENTITY_ID)
         if off_value not in (None, "") and entity_id:
-            await self._apply(entity_id, off_value)
+            try:
+                await self._call(entity_id, off_value)
+            except Exception as err:  # noqa: BLE001 - never break the scheduler
+                self.last_error = f"{entity_id}: {err}"
+                _LOGGER.error("Failed to set %s to %s: %s", entity_id, off_value, err)
+                self._log_action(plan.device, "stop", str(off_value), err)
+            else:
+                self._log_action(plan.device, "stop", str(off_value))
         plan.stopped = True
 
     async def _call_action(self, action: str, data: dict[str, Any]) -> None:
@@ -800,14 +830,6 @@ class CheapestHourScheduler:
             raise HomeAssistantError(f"Action {action} does not exist")
         await self.hass.services.async_call(domain, service, data, blocking=True)
         _LOGGER.info("Called %s with %s", action, data)
-
-    async def _apply(self, entity_id: str, value: Any) -> None:
-        """Scheduled action: never raises, errors end up in last_error."""
-        try:
-            await self._call(entity_id, value)
-        except Exception as err:  # noqa: BLE001 - never break the scheduler
-            self.last_error = f"{entity_id}: {err}"
-            _LOGGER.error("Failed to set %s to %s: %s", entity_id, value, err)
 
     async def _call(self, entity_id: str, value: Any) -> None:
         """Translate (entity, value) into the right service call. Raises on error."""

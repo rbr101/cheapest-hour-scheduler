@@ -11,7 +11,7 @@
  * hours: 36                                   # optional, max hours shown
  */
 
-const CARD_VERSION = "0.7.3";
+const CARD_VERSION = "0.7.4";
 const WS_TYPE = "cheapest_hour_scheduler/plan";
 const REFRESH_MS = 60 * 1000;
 
@@ -39,6 +39,29 @@ const NL = {
   planned: "gepland",
   now: "nu",
   off: "uitgeschakeld",
+  start: "Start",
+  d_target: "Entiteit",
+  d_action: "Actie",
+  d_data: "Actie-data",
+  d_on: "Waarde bij start",
+  d_off: "Waarde aan het eind",
+  d_ready: "Klaar om",
+  d_duration: "Looptijd",
+  d_offset: "Start-offset",
+  d_enabled: "Ingeschakeld",
+  d_planned: "Gepland",
+  d_price: "Gem. prijs",
+  d_status: "Status",
+  d_last: "Laatst verstuurd",
+  d_none: "nog niets",
+  d_failed: "mislukt",
+  d_ok: "gelukt",
+  d_open: "Apparaat openen",
+  d_close: "Sluiten",
+  yes: "ja",
+  no: "nee",
+  hours: "uur",
+  followsBlock: "volgt het goedkoopste blok",
 };
 const EN = {
   noData: "No price data",
@@ -53,6 +76,29 @@ const EN = {
   planned: "planned",
   now: "now",
   off: "disabled",
+  start: "Start",
+  d_target: "Entity",
+  d_action: "Action",
+  d_data: "Action data",
+  d_on: "Value at start",
+  d_off: "Value at end",
+  d_ready: "Ready by",
+  d_duration: "Run time",
+  d_offset: "Start offset",
+  d_enabled: "Enabled",
+  d_planned: "Planned",
+  d_price: "Avg price",
+  d_status: "Status",
+  d_last: "Last sent",
+  d_none: "nothing yet",
+  d_failed: "failed",
+  d_ok: "ok",
+  d_open: "Open device",
+  d_close: "Close",
+  yes: "yes",
+  no: "no",
+  hours: "h",
+  followsBlock: "follows the cheapest block",
 };
 
 class CheapestHourCard extends HTMLElement {
@@ -64,6 +110,7 @@ class CheapestHourCard extends HTMLElement {
     this._width = 600;
     this._lastFetch = 0;
     this._watchUpdated = null;
+    this._open = null; // "entry_id:record_id" of the record whose details are shown
   }
 
   static getStubConfig() {
@@ -147,6 +194,76 @@ class CheapestHourCard extends HTMLElement {
         <div class="header">${esc(title)}</div>
         <div class="content">${body}</div>
       </ha-card>`;
+
+    // Click a record name to show (or hide) its properties.
+    this.shadowRoot.querySelectorAll("[data-rec]").forEach((el) =>
+      el.addEventListener("click", () => {
+        this._open = this._open === el.dataset.rec ? null : el.dataset.rec;
+        this._render();
+      })
+    );
+    this.shadowRoot.querySelectorAll("[data-nav]").forEach((el) =>
+      el.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        history.pushState(null, "", el.dataset.nav);
+        window.dispatchEvent(new CustomEvent("location-changed", { bubbles: true, composed: true }));
+      })
+    );
+  }
+
+  _renderDetails(entry, d, hm, fmt) {
+    const L = this._lang || EN;
+    const r = d.record || {};
+    const p = d.plan;
+    const rows = [];
+    const row = (k, v, cls = "") => rows.push(`<tr><th>${k}</th><td class="${cls}">${v}</td></tr>`);
+    if (r.action) {
+      row(L.d_action, `<code>${esc(r.action)}</code>`);
+      if (r.action_data) row(L.d_data, `<pre>${esc(r.action_data)}</pre>`);
+    }
+    if (r.entity_id) {
+      row(L.d_target, `<code>${esc(r.entity_id)}</code>`);
+      if (!r.action) row(L.d_on, esc(r.on_value ?? "on"));
+      if (r.off_value) row(L.d_off, esc(r.off_value));
+    }
+    row(L.d_ready, r.ready_by ? esc(String(r.ready_by).slice(0, 5)) : `<i>${L.followsBlock}</i>`);
+    if (r.duration_hours) row(L.d_duration, `${r.duration_hours} ${L.hours}`);
+    if (r.start_offset_minutes) row(L.d_offset, `${r.start_offset_minutes} min`);
+    row(L.d_enabled, d.enabled === false ? L.no : L.yes);
+    if (p) {
+      const state = p.running ? "running" : t(p.end) <= (t(entry.now) || Date.now()) || p.stopped ? "done" : "planned";
+      row(L.d_planned, `<b>${L.start} ${hm(t(p.start))}</b> – ${hm(t(p.end))}`);
+      if (p.price != null) row(L.d_price, `${fmt(p.price)} ${esc(entry.unit)}`);
+      row(L.d_status, L[state]);
+    } else if (d.waiting) {
+      row(L.d_status, esc(d.waiting));
+    }
+    const a = d.last_action;
+    if (a) {
+      const when = new Date(a.time).toLocaleString(this._hass?.locale?.language || undefined, {
+        weekday: "short", hour: "2-digit", minute: "2-digit", hour12: this._hour12(),
+      });
+      row(
+        L.d_last,
+        `${when} · ${esc(a.what)} · <code>${esc(a.sent)}</code> · ${a.ok ? L.d_ok : `${L.d_failed}: ${esc(a.error)}`}`,
+        a.ok ? "" : "error"
+      );
+    } else {
+      row(L.d_last, `<i>${L.d_none}</i>`);
+    }
+    const link = d.device_id
+      ? `<a href="/config/devices/device/${esc(d.device_id)}" data-nav="/config/devices/device/${esc(d.device_id)}">${L.d_open}</a>`
+      : "";
+    return `
+      <div class="details">
+        <div class="details-head"><b>${esc(d.name)}</b><span>${link}<a href="#" data-rec="${esc(entry.entry_id)}:${esc(d.id)}">${L.d_close}</a></span></div>
+        <table>${rows.join("")}</table>
+      </div>`;
+  }
+
+  _hour12() {
+    const tf = this._hass?.locale?.time_format;
+    return tf === "12" ? true : tf === "24" ? false : undefined;
   }
 
   _renderEntry(entry, showTitle) {
@@ -185,7 +302,12 @@ class CheapestHourCard extends HTMLElement {
       return `hsl(${Math.round(120 - 120 * r)}, 65%, 48%)`;
     };
     const fmt = (v) => (v == null ? "–" : (Math.round(v * 1000) / 1000).toFixed(3));
-    const hm = (ms) => new Date(ms).toLocaleTimeString(this._hass?.locale?.language || undefined, { hour: "2-digit", minute: "2-digit" });
+    const hm = (ms) =>
+      new Date(ms).toLocaleTimeString(this._hass?.locale?.language || undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: this._hour12(),
+      });
 
     let svg = "";
 
@@ -232,7 +354,8 @@ class CheapestHourCard extends HTMLElement {
       const name = d.name.length > 18 ? d.name.slice(0, 17) + "…" : d.name;
       svg += `<line class="rowline" x1="0" x2="${LABEL_W + plotW}" y1="${ry + ROW_H}" y2="${ry + ROW_H}"/>`;
       const off = d.enabled === false;
-      svg += `<text class="label${off ? " off" : ""}" x="0" y="${ry + ROW_H / 2 + 4}"><title>${esc(d.name)}\n${esc(d.entity_id)}</title>${esc(name)}</text>`;
+      const recKey = `${entry.entry_id}:${d.id}`;
+      svg += `<text class="label${off ? " off" : ""}${this._open === recKey ? " open" : ""}" data-rec="${esc(recKey)}" x="0" y="${ry + ROW_H / 2 + 4}"><title>${esc(d.name)}\n${esc(d.entity_id)}</title>${esc(name)}</text>`;
       const p = d.plan;
       if (off) {
         svg += `<text class="axis muted" x="${LABEL_W + 4}" y="${ry + ROW_H / 2 + 4}">${L.off}</text>`;
@@ -243,10 +366,12 @@ class CheapestHourCard extends HTMLElement {
         const bx = x(ps);
         const bw = Math.max(3, x(pe) - bx);
         const label = `${hm(ps)}–${hm(pe)}`;
-        const tip = `${d.name}\n${label}  (${L[state]})${p.price != null ? `\n${L.avg} ${fmt(p.price)} ${entry.unit}` : ""}${p.value ? `\n→ ${p.value}` : ""}`;
+        const tip = `${d.name}\n${L.start} ${hm(ps)} – ${hm(pe)}  (${L[state]})${p.price != null ? `\n${L.avg} ${fmt(p.price)} ${entry.unit}` : ""}${p.value ? `\n→ ${p.value}` : ""}`;
         if (ps < end && pe > start) {
           svg += `<rect class="bar ${state}" x="${bx}" y="${ry + 5}" width="${bw}" height="${ROW_H - 10}" rx="4"><title>${esc(tip)}</title></rect>`;
-          if (bw > 78) svg += `<text class="barlabel" x="${bx + bw / 2}" y="${ry + ROW_H / 2 + 4}" text-anchor="middle">${label}</text>`;
+          // The start time is what matters: spell it out when there is room.
+          if (bw > 150) svg += `<text class="barlabel" x="${bx + bw / 2}" y="${ry + ROW_H / 2 + 4}" text-anchor="middle">${L.start} ${hm(ps)} – ${hm(pe)}</text>`;
+          else if (bw > 78) svg += `<text class="barlabel" x="${bx + bw / 2}" y="${ry + ROW_H / 2 + 4}" text-anchor="middle">${label}</text>`;
           else {
             // Right of the bar, unless the ready-by flag or the edge is in the way.
             const LW = 78;
@@ -291,6 +416,7 @@ class CheapestHourCard extends HTMLElement {
       <div class="entry">
         ${showTitle ? `<div class="subtitle">${esc(entry.title)}</div>` : ""}
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">${svg}</svg>
+        ${devices.filter((d) => this._open === `${entry.entry_id}:${d.id}`).map((d) => this._renderDetails(entry, d, hm, fmt)).join("")}
         <div class="notes">${notes.join("<br>")}</div>
       </div>`;
   }
@@ -315,6 +441,17 @@ class CheapestHourCard extends HTMLElement {
       .axis.date { font-weight: 500; }
       .muted { font-style: italic; }
       .label { font-size: 12px; fill: var(--primary-text-color); }
+      .label { cursor: pointer; }
+      .label:hover, .label.open { fill: var(--primary-color); text-decoration: underline; }
+      .details { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--divider-color, #ddd); border-radius: 8px; font-size: 13px; color: var(--primary-text-color); }
+      .details-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 14px; }
+      .details-head a { margin-left: 14px; font-size: 12px; color: var(--primary-color); text-decoration: none; cursor: pointer; }
+      .details table { border-collapse: collapse; width: 100%; }
+      .details th { text-align: left; font-weight: 400; color: var(--secondary-text-color); padding: 2px 12px 2px 0; white-space: nowrap; vertical-align: top; width: 1%; }
+      .details td { padding: 2px 0; word-break: break-word; }
+      .details td.error { color: var(--error-color, #db4437); }
+      .details pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
+      .details code { font-size: 12px; }
       .label.off { fill: var(--disabled-text-color, #9e9e9e); text-decoration: line-through; }
       .bar.planned { fill: var(--primary-color); }
       .bar.running { fill: var(--success-color, #43a047); }

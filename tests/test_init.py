@@ -285,6 +285,9 @@ async def test_websocket_plan(hass, hass_ws_client):
     assert data["title"] == "Test"
     assert len(data["prices"]) == 32
     assert data["devices"][0]["entity_id"] == "input_boolean.charger"
+    assert data["devices"][0]["record"]["on_value"] == "on"
+    assert data["devices"][0]["device_id"]
+    assert data["devices"][0]["last_action"] is None
     plan = data["devices"][0]["plan"]
     assert dt_util.parse_datetime(plan["start"]) == slot0 + timedelta(hours=2)
 
@@ -345,7 +348,7 @@ async def test_record_description_device_and_switch(hass, freezer):
     await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.thuisaccu_enabled"}, blocking=True)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "off"
-    freezer.move_to(slot0 + timedelta(hours=2, minutes=5))
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=8))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "on"
@@ -672,11 +675,11 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
 
     # The dishwasher is not planned in the past but a few minutes from now,
     # and the action is sent again with that delay
-    soon = slot0 + timedelta(hours=1, minutes=23)
+    soon = slot0 + timedelta(hours=1, minutes=25)
     assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
     assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_end").state) == soon + timedelta(hours=1.5)
     assert len(calls) == 2
-    assert calls[1].data["b_s_h_common_option_start_in_relative"] == 180
+    assert calls[1].data["b_s_h_common_option_start_in_relative"] == 300
 
     # A device added now also starts a few minutes from now, not in the past
     result = await _subentry_flow(
@@ -753,9 +756,12 @@ async def test_replans_window_that_began_without_a_start(hass, hass_storage, fre
     await hass.async_block_till_done()
 
     # Dishwasher: marked started but nothing was ever sent -> planned again from now
-    soon = slot0 + timedelta(minutes=13)
+    soon = slot0 + timedelta(minutes=15)
     assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
-    assert len(calls) == 1 and calls[0].data["b_s_h_common_option_start_in_relative"] == 180
+    assert len(calls) == 1 and calls[0].data["b_s_h_common_option_start_in_relative"] == 300
+    sched = hass.data[DOMAIN][entry.entry_id]
+    last = sched.last_actions["dw"]
+    assert last["ok"] and last["what"] == "start" and "start_in_relative=300" in last["sent"]
 
     # Boiler: really on -> its running window is kept
     assert dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state) == slot0

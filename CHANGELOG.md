@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.4] - 2026-11-15
+
+### Added
+- Card: **click a record's name** to show its properties: entity or action and data,
+  values, ready by, run time, planned start and end, average price, status, and what was
+  **last sent** to the device, including the error when that failed. With a link to the
+  record's device page.
+- Card: wide bars spell out the start time ("Start 10:10 – 14:10"); times follow the
+  12/24-hour setting of your Home Assistant profile.
+- The last thing sent per record (start, stop, test) and its result is stored.
+
+### Changed
+- A start that would fall in the past is now planned **5 minutes** from now (was 2 to 3).
+
 ## [0.7.3] - 2026-11-15
 
 ### Fixed
