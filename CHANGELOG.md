@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.2] - 2026-11-15
+
+### Fixed
+- A record whose window had **already begun** when it was planned (for example after
+  changing its ready-by time or run time inside the cheapest hours) was not started
+  when it uses `auto` or `{seconds_until_start}`. It is now started right away
+  (delay 0).
+- **Editing a record now always replans it**, also while it is running or already
+  done. Before, a running record kept its old window until that ended.
+- With *ready by*, the run for the next ready-by moment could be planned directly after
+  the previous run in the same cheap hours. A run now belongs to the 24 hours before
+  its ready-by moment.
+
 ## [0.7.1] - 2026-11-14
 
 ### Fixed

@@ -596,3 +596,81 @@ async def test_migrates_records_from_options(hass, freezer):
     assert device.id == old_device.id  # same device, history kept
     assert device.config_entries_subentries[entry.entry_id] == {subentry.subentry_id}
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
+    """Changing a record so its window has already begun must still start it."""
+    from homeassistant.core import ServiceCall
+
+    calls: list[ServiceCall] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("home_connect", "start_selected_program", _record)
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    # cheap from +1h to +3h
+    values = [0.6] * 4 + [0.2] * 8 + [0.6] * 180
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"boiler": {}}})
+
+    def at(hours):
+        return dt_util.as_local(slot0 + timedelta(hours=hours)).strftime("%H:%M:00")
+
+    boiler = {"id": "bo", "name": "Boiler", "entity_id": "input_boolean.boiler", "on_value": "on",
+              "off_value": "off", "duration_hours": 1, "ready_by": at(20)}
+    washer = {"id": "dw", "name": "Vaatwasser", "on_value": "on", "duration_hours": 1, "ready_by": at(20),
+              "action": "home_connect.start_selected_program",
+              "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}"}
+    entry = _mock_entry(
+        domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [boiler, washer]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    # Planned at the start of the cheap hours; dishwasher got its delay
+    assert dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state) == slot0 + timedelta(hours=1)
+    assert len(calls) == 1 and calls[0].data["b_s_h_common_option_start_in_relative"] > 0
+
+    # 20 minutes into the cheap hours both are running
+    freezer.move_to(slot0 + timedelta(hours=1, minutes=20))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.boiler").state == "on"
+
+    # Now edit both: longer run time and another ready-by. The new windows fall in
+    # the cheap hours and begin in the slot that is already running.
+    by_id = {s.unique_id: s for s in entry.subentries.values()}
+    hass.config_entries.async_update_subentry(
+        entry, by_id["bo"], data={**boiler, "duration_hours": 1.5, "ready_by": at(3)}
+    )
+    await hass.async_block_till_done()
+    hass.config_entries.async_update_subentry(
+        entry, by_id["dw"], data={**washer, "duration_hours": 1.5, "ready_by": at(3)}
+    )
+    await hass.async_block_till_done()
+
+    start = dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state)
+    end = dt_util.parse_datetime(hass.states.get("sensor.boiler_end").state)
+    assert start == slot0 + timedelta(hours=1, minutes=15)  # the running slot
+    assert end == slot0 + timedelta(hours=2, minutes=45)  # new run time is used
+    assert hass.states.get("input_boolean.boiler").state == "on"
+
+    # The dishwasher action is sent again, to start right away
+    assert len(calls) == 2
+    assert calls[1].data["b_s_h_common_option_start_in_relative"] == 0
+
+    # Replanning doesn't send it again; boiler goes off at the new end
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=46))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    # ...and the next run (tomorrow's ready-by) is not squeezed into today's cheap hours
+    assert all(c.data["b_s_h_common_option_start_in_relative"] > 0 for c in calls[2:])
+    assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) >= slot0 + timedelta(hours=3)
+    assert hass.states.get("input_boolean.boiler").state == "off"
+    assert await hass.config_entries.async_unload(entry.entry_id)

@@ -11,6 +11,7 @@ Two kinds of device records:
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -108,6 +109,7 @@ class DevicePlan:
     started: bool = False
     stopped: bool = False
     armed_value: str | None = None  # value sent for "seconds until start" devices
+    config: str | None = None  # fingerprint of the record this plan was made for
     unsubs: list[Callable[[], None]] = field(default_factory=list, compare=False)
 
     @property
@@ -143,6 +145,7 @@ class DevicePlan:
             "started": self.started,
             "stopped": self.stopped,
             "armed_value": self.armed_value,
+            "config": self.config,
         }
 
     @classmethod
@@ -159,6 +162,7 @@ class DevicePlan:
                 started=bool(data.get("started")),
                 stopped=bool(data.get("stopped")),
                 armed_value=data.get("armed_value"),
+                config=data.get("config"),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -218,6 +222,13 @@ def record_name(hass: HomeAssistant, device: dict[str, Any]) -> str:
         return entity_id.split(".", 1)[-1].replace("_", " ").capitalize()
     action = record_action(device)
     return action.split(".", 1)[-1].replace("_", " ").capitalize() if action else "Record"
+
+
+def record_fingerprint(device: dict[str, Any]) -> str:
+    """Changes when the record is edited (the description doesn't count)."""
+    return json.dumps(
+        {k: v for k, v in device.items() if k != CONF_DESCRIPTION}, sort_keys=True, default=str
+    )
 
 
 def _hours(device: dict[str, Any], default: float) -> float:
@@ -479,14 +490,21 @@ class CheapestHourScheduler:
             base = max(now, prev.deadline)  # done for that deadline -> next one
         deadline = next_occurrence(base, ready_by, tz)
         latest_start = deadline - timedelta(hours=hours)
+        # One run per ready-by moment: it belongs to the 24 hours before it, so the
+        # run for tomorrow can't start right after today's run in the same cheap hours.
+        not_before = deadline - timedelta(hours=24)
 
         window = None
         if covers(self.slots, deadline):
-            window = find_cheapest_block(self.slots, hours, now, deadline=deadline)
+            window = find_cheapest_block(
+                self.slots, hours, now, not_before=not_before, deadline=deadline
+            )
         elif latest_start <= now + REPLAN_INTERVAL:
             # Prices don't reach the deadline, but waiting longer would be too late:
             # take the cheapest window we know about, or simply start now.
-            window = find_cheapest_block(self.slots, hours, now, deadline=deadline)
+            window = find_cheapest_block(
+                self.slots, hours, now, not_before=not_before, deadline=deadline
+            )
             if window is None:
                 start = now
                 return DevicePlan(
@@ -532,6 +550,16 @@ class CheapestHourScheduler:
                         prev.cancel()
                     self.waiting[dev_id] = "disabled"
                     continue
+                fingerprint = record_fingerprint(device)
+                edited: DevicePlan | None = None
+                if prev and prev.config is None:
+                    prev.config = fingerprint  # plan from before fingerprints existed
+                elif prev and prev.config != fingerprint:
+                    # The record was edited (e.g. another ready-by time or run
+                    # time): forget the old plan, also when it is running or done,
+                    # and plan again with the new settings.
+                    prev.cancel()
+                    edited, prev = prev, None
                 if prev and prev.locked(now):
                     new_plans[dev_id] = prev
                     continue
@@ -540,6 +568,12 @@ class CheapestHourScheduler:
                     await self._run_stop(prev)
 
                 plan = self._new_plan(device, prev, now)
+                if plan is not None and plan.config is None:
+                    plan.config = fingerprint
+                if edited and edited.started and not edited.stopped and edited.end and self.enabled:
+                    # Was on for the old plan: switch back unless the new plan is on now too.
+                    if plan is None or plan.is_relative or not plan.locked(now):
+                        await self._run_stop(edited)
                 if plan is None:
                     if prev:
                         prev.cancel()
@@ -577,9 +611,12 @@ class CheapestHourScheduler:
             if plan.is_relative:
                 # e.g. dishwasher "start in X seconds": sent once per planned start
                 # moment; a moved start creates a fresh plan (armed_value None).
-                if not plan.started and plan.start > now and plan.armed_value is None:
+                if not plan.started and plan.armed_value is None and now < plan.run_end:
+                    # Start in the future: send the delay. Start moment already
+                    # reached (planned inside the running slot, or HA was down):
+                    # send it with a delay of 0 so the device starts right away.
                     await self._arm_relative(plan, now)
-                elif not plan.started and plan.start <= now:
+                if not plan.started and plan.start <= now:
                     plan.started = True
             elif not plan.started:
                 if plan.start <= now < plan.run_end:
