@@ -866,3 +866,56 @@ async def test_retries_failed_action(hass, monkeypatch):
     assert not sched.last_actions["br"]["ok"] and sched.last_actions["br"]["attempts"] == 5
     assert "appliance offline" in sched.last_actions["br"]["error"]
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_websocket_update_record(hass, hass_ws_client):
+    """The card can save a record; it is validated and replanned like the edit form."""
+    hass.services.async_register("home_connect", "start_selected_program", lambda call: None)
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    hass.states.async_set(
+        "sensor.price", "0.6",
+        {"prices_today": _prices(slot0, [0.6] * 8 + [0.2] * 4 + [0.6] * 20), "prices_tomorrow": []},
+    )
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"charger": {}}})
+    entry = _mock_entry(
+        domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [{"id": "a", "name": "Thuisaccu", "entity_id": "input_boolean.charger",
+                              "on_value": "on", "off_value": "off"}]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client = await hass_ws_client(hass)
+    base = {"type": f"{DOMAIN}/update_record", "entry_id": entry.entry_id, "record_id": "a"}
+
+    # Validation errors come back per field
+    await client.send_json({"id": 1, **base, "record": {"name": "X", "entity_id": "", "action": ""}})
+    msg = await client.receive_json()
+    assert msg["result"] == {"ok": False, "errors": {"base": "entity_or_action"}}
+    await client.send_json({"id": 2, **base, "record": {
+        "action": "home_connect.start_selected_program", "action_data": "- a"}})
+    msg = await client.receive_json()
+    assert msg["result"]["errors"] == {"action_data": "invalid_data"}
+
+    # A valid change is saved in the subentry; id and unique id are kept
+    await client.send_json({"id": 3, **base, "record": {
+        "name": "Accu", "entity_id": "input_boolean.charger", "on_value": "on", "off_value": "off",
+        "action": "", "action_data": "", "ready_by": "", "duration_hours": 0.5, "start_offset_minutes": 15}})
+    msg = await client.receive_json()
+    assert msg["result"] == {"ok": True}
+    await hass.async_block_till_done()
+    (subentry,) = entry.subentries.values()
+    assert subentry.title == "Accu" and subentry.unique_id == "a"
+    assert subentry.data["id"] == "a"
+    assert subentry.data["duration_hours"] == 0.5 and subentry.data["start_offset_minutes"] == 15
+    assert "ready_by" not in subentry.data and "action" not in subentry.data
+    sched = hass.data[DOMAIN][entry.entry_id]
+    plan = sched.device_plans["a"]
+    assert plan.start == slot0 + timedelta(hours=2, minutes=15)
+    assert plan.run_end - plan.start == timedelta(minutes=30)
+
+    await client.send_json({"id": 4, **base, "record_id": "nope", "record": {}})
+    msg = await client.receive_json()
+    assert not msg["success"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

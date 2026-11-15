@@ -192,6 +192,7 @@ What you see, from left to right over time:
 * A row per device record with a **bar for when it is on**: blue = planned, green = running now, grey = done. Hover a bar for the exact times, average price and the value that is sent.
 * An orange flag marks the device's **ready by** time.
 * **Click a device's name** to see its properties: entity or action, values, ready by, run time, the planned start, and what was last sent to the device (with the error if that failed).
+* In that panel, **Edit device** opens a form in the card to change the device's settings (administrators only). Saving plans the device again.
 * A red line marks **now**.
 
 The card reads its data through a websocket command (`cheapest_hour_scheduler/plan`), so it keeps working on the stored prices when the price sensor is unavailable.

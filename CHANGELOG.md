@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.8] - 2026-11-15
+
+### Added
+- Card: **Edit device** in the details panel of a record. It opens a form in the card
+  with all settings (description, entity, values, action and data, ready by, run time,
+  offset). Saving uses the same checks as the edit form of the integration and replans
+  the record. Only shown to administrators.
+
 ## [0.7.7] - 2026-11-15
 
 ### Added

@@ -11,7 +11,7 @@
  * hours: 36                                   # optional, max hours shown
  */
 
-const CARD_VERSION = "0.7.7";
+const CARD_VERSION = "0.7.8";
 const WS_TYPE = "cheapest_hour_scheduler/plan";
 const REFRESH_MS = 60 * 1000;
 
@@ -58,6 +58,18 @@ const NL = {
   d_ok: "gelukt",
   d_tries: "geprobeerd",
   d_open: "Apparaat openen",
+  d_edit: "Apparaat wijzigen",
+  d_save: "Opslaan",
+  d_cancel: "Annuleren",
+  d_saving: "Opslaan…",
+  d_name: "Beschrijving",
+  d_hint_data: "YAML. Gebruik {seconds_until_start} voor de tijd tot de geplande start.",
+  d_hint_ready: "Leeg = volgt het goedkoopste blok",
+  e_entity_or_action: "Kies een entiteit of een actie.",
+  e_unknown_action: "Deze actie bestaat niet.",
+  e_invalid_data: "De data is geen geldige YAML met sleutel: waarde-paren.",
+  e_not_a_number: "Vul een getal in (of 'auto').",
+  e_off_needs_entity: "Een waarde aan het eind vereist een entiteit.",
   d_close: "Sluiten",
   yes: "ja",
   no: "nee",
@@ -96,6 +108,18 @@ const EN = {
   d_ok: "ok",
   d_tries: "tried",
   d_open: "Open device",
+  d_edit: "Edit device",
+  d_save: "Save",
+  d_cancel: "Cancel",
+  d_saving: "Saving…",
+  d_name: "Description",
+  d_hint_data: "YAML. Use {seconds_until_start} for the time until the planned start.",
+  d_hint_ready: "Empty = follows the cheapest block",
+  e_entity_or_action: "Choose an entity or an action.",
+  e_unknown_action: "This action does not exist.",
+  e_invalid_data: "The data is not valid YAML with key: value pairs.",
+  e_not_a_number: "Enter a number (or 'auto').",
+  e_off_needs_entity: "A value at end needs an entity.",
   d_close: "Close",
   yes: "yes",
   no: "no",
@@ -113,6 +137,9 @@ class CheapestHourCard extends HTMLElement {
     this._lastFetch = 0;
     this._watchUpdated = null;
     this._open = null; // "entry_id:record_id" of the record whose details are shown
+    this._edit = null; // same key while that record is being edited in the card
+    this._formErrors = {};
+    this._saving = false;
   }
 
   static getStubConfig() {
@@ -151,7 +178,7 @@ class CheapestHourCard extends HTMLElement {
       const w = Math.floor(entries[0].contentRect.width);
       if (w > 0 && Math.abs(w - this._width) > 2) {
         this._width = w;
-        this._render();
+        if (!this._edit) this._render(); // don't wipe a form that is being filled in
       }
     });
     this._ro.observe(this);
@@ -172,6 +199,55 @@ class CheapestHourCard extends HTMLElement {
       this._error = null;
     } catch (err) {
       this._error = err?.message || String(err);
+    }
+    if (!this._edit) this._render(); // don't wipe a form that is being filled in
+  }
+
+  _formValues() {
+    const values = {};
+    this.shadowRoot.querySelectorAll("[data-field]").forEach((el) => {
+      values[el.dataset.field] = el.value;
+    });
+    return values;
+  }
+
+  async _saveRecord(entryId, recordId) {
+    const v = this._formValues();
+    this._draft = v;
+    const record = {
+      name: v.name?.trim(),
+      entity_id: v.entity_id?.trim(),
+      on_value: v.on_value?.trim(),
+      off_value: v.off_value?.trim(),
+      action: v.action?.trim(),
+      action_data: v.action_data,
+      ready_by: v.ready_by ? (v.ready_by.length === 5 ? `${v.ready_by}:00` : v.ready_by) : "",
+      duration_hours: v.duration_hours === "" ? "" : Number(v.duration_hours),
+      start_offset_minutes: v.start_offset_minutes === "" ? 0 : Number(v.start_offset_minutes),
+    };
+    this._saving = true;
+    this._formErrors = {};
+    this._render();
+    try {
+      const res = await this._hass.callWS({
+        type: "cheapest_hour_scheduler/update_record",
+        entry_id: entryId,
+        record_id: recordId,
+        record,
+      });
+      this._saving = false;
+      if (res.ok) {
+        this._edit = null;
+        this._draft = null;
+        // The integration reloads after a change; fetch the new plan shortly after.
+        setTimeout(() => this._fetch(), 1500);
+        setTimeout(() => this._fetch(), 5000);
+      } else {
+        this._formErrors = res.errors || {};
+      }
+    } catch (err) {
+      this._saving = false;
+      this._formErrors = { base: err?.message || String(err) };
     }
     this._render();
   }
@@ -201,7 +277,26 @@ class CheapestHourCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-rec]").forEach((el) =>
       el.addEventListener("click", () => {
         this._open = this._open === el.dataset.rec ? null : el.dataset.rec;
+        this._edit = null;
         this._render();
+      })
+    );
+    this.shadowRoot.querySelectorAll("[data-edit]").forEach((el) =>
+      el.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        this._edit = el.dataset.edit || null;
+        this._draft = null;
+        this._formErrors = {};
+        if (this._edit) this._open = this._edit;
+        this._render();
+        if (!this._edit) this._fetch();
+      })
+    );
+    this.shadowRoot.querySelectorAll("[data-save]").forEach((el) =>
+      el.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const [entryId, recordId] = el.dataset.save.split(":");
+        this._saveRecord(entryId, recordId);
       })
     );
     this.shadowRoot.querySelectorAll("[data-nav]").forEach((el) =>
@@ -213,8 +308,60 @@ class CheapestHourCard extends HTMLElement {
     );
   }
 
+  _renderEditForm(entry, d) {
+    const L = this._lang || EN;
+    const key = `${entry.entry_id}:${d.id}`;
+    const r = d.record || {};
+    const v = this._draft || {
+      name: r.name ?? "",
+      entity_id: r.entity_id ?? "",
+      on_value: r.on_value ?? "on",
+      off_value: r.off_value ?? "",
+      action: r.action ?? "",
+      action_data: r.action_data ?? "",
+      ready_by: r.ready_by ? String(r.ready_by).slice(0, 5) : "",
+      duration_hours: r.duration_hours ?? "",
+      start_offset_minutes: r.start_offset_minutes ?? 0,
+    };
+    const err = (f) => {
+      const code = this._formErrors[f];
+      return code ? `<div class="ferr">${esc(L[`e_${code}`] || code)}</div>` : "";
+    };
+    const input = (f, type = "text", extra = "") =>
+      `<input data-field="${f}" type="${type}" value="${esc(v[f])}" ${extra}>${err(f)}`;
+    const states = Object.keys(this._hass?.states || {}).sort();
+    const services = Object.entries(this._hass?.services || {})
+      .flatMap(([dom, svcs]) => Object.keys(svcs).map((svc) => `${dom}.${svc}`))
+      .sort();
+    const row = (label, html, hint = "") =>
+      `<tr><th>${label}</th><td>${html}${hint ? `<div class="hint">${esc(hint)}</div>` : ""}</td></tr>`;
+    return `
+      <div class="details editing">
+        <div class="details-head"><b>${L.d_edit}: ${esc(d.name)}</b></div>
+        ${this._formErrors.base ? `<div class="ferr">${esc(L[`e_${this._formErrors.base}`] || this._formErrors.base)}</div>` : ""}
+        <table>
+          ${row(L.d_name, input("name"))}
+          ${row(L.d_target, input("entity_id", "text", 'list="chs-entities" autocomplete="off"'))}
+          ${row(L.d_on, input("on_value"))}
+          ${row(L.d_off, input("off_value"))}
+          ${row(L.d_action, input("action", "text", 'list="chs-services" autocomplete="off"'))}
+          ${row(L.d_data, `<textarea data-field="action_data" rows="5" spellcheck="false">${esc(v.action_data)}</textarea>${err("action_data")}`, L.d_hint_data)}
+          ${row(L.d_ready, input("ready_by", "time"), L.d_hint_ready)}
+          ${row(`${L.d_duration} (${L.hours})`, input("duration_hours", "number", 'min="0.25" max="24" step="0.25"'))}
+          ${row(`${L.d_offset} (min)`, input("start_offset_minutes", "number", 'min="0" max="1440" step="15"'))}
+        </table>
+        <datalist id="chs-entities">${states.map((e) => `<option value="${esc(e)}">`).join("")}</datalist>
+        <datalist id="chs-services">${services.map((e) => `<option value="${esc(e)}">`).join("")}</datalist>
+        <div class="buttons">
+          <button data-edit="" ${this._saving ? "disabled" : ""}>${L.d_cancel}</button>
+          <button class="primary" data-save="${esc(key)}" ${this._saving ? "disabled" : ""}>${this._saving ? L.d_saving : L.d_save}</button>
+        </div>
+      </div>`;
+  }
+
   _renderDetails(entry, d, hm, fmt) {
     const L = this._lang || EN;
+    if (this._edit === `${entry.entry_id}:${d.id}`) return this._renderEditForm(entry, d);
     const r = d.record || {};
     const p = d.plan;
     const rows = [];
@@ -253,12 +400,15 @@ class CheapestHourCard extends HTMLElement {
     } else {
       row(L.d_last, `<i>${L.d_none}</i>`);
     }
+    const editLink = this._hass?.user?.is_admin === false
+      ? ""
+      : `<a href="#" data-edit="${esc(entry.entry_id)}:${esc(d.id)}">${L.d_edit}</a>`;
     const link = d.device_id
       ? `<a href="/config/devices/device/${esc(d.device_id)}" data-nav="/config/devices/device/${esc(d.device_id)}">${L.d_open}</a>`
       : "";
     return `
       <div class="details">
-        <div class="details-head"><b>${esc(d.name)}</b><span>${link}<a href="#" data-rec="${esc(entry.entry_id)}:${esc(d.id)}">${L.d_close}</a></span></div>
+        <div class="details-head"><b>${esc(d.name)}</b><span>${editLink}${link}<a href="#" data-rec="${esc(entry.entry_id)}:${esc(d.id)}">${L.d_close}</a></span></div>
         <table>${rows.join("")}</table>
       </div>`;
   }
@@ -448,6 +598,17 @@ class CheapestHourCard extends HTMLElement {
       .details { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--divider-color, #ddd); border-radius: 8px; font-size: 13px; color: var(--primary-text-color); }
       .details-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 14px; }
       .details-head a { margin-left: 14px; font-size: 12px; color: var(--primary-color); text-decoration: none; cursor: pointer; }
+      .details input, .details textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--primary-text-color); background: var(--secondary-background-color, #f5f5f5); border: 1px solid var(--divider-color, #ccc); border-radius: 6px; }
+      .details textarea { font-family: var(--code-font-family, monospace); font-size: 12px; resize: vertical; }
+      .details input:focus, .details textarea:focus { outline: 2px solid var(--primary-color); outline-offset: -1px; }
+      .details.editing th { padding-top: 8px; }
+      .details.editing td { padding: 3px 0; }
+      .hint { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
+      .ferr { font-size: 12px; color: var(--error-color, #db4437); margin: 2px 0; }
+      .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+      .buttons button { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--divider-color, #ccc); background: transparent; color: var(--primary-text-color); cursor: pointer; }
+      .buttons button.primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+      .buttons button:disabled { opacity: .6; cursor: default; }
       .details table { border-collapse: collapse; width: 100%; }
       .details th { text-align: left; font-weight: 400; color: var(--secondary-text-color); padding: 2px 12px 2px 0; white-space: nowrap; vertical-align: top; width: 1%; }
       .details td { padding: 2px 0; overflow-wrap: anywhere; }

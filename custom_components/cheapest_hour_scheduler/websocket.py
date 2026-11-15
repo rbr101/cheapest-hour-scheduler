@@ -11,7 +11,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_DEVICE_ID, CONF_ENTITY_ID, CONF_READY_BY, DOMAIN
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_ENTITY_ID,
+    CONF_READY_BY,
+    DOMAIN,
+    EDITED_RECORDS,
+    SUBENTRY_TYPE_RECORD,
+)
 
 WS_TYPE = f"{DOMAIN}/plan"
 
@@ -40,7 +47,7 @@ def serialize(hass: HomeAssistant, scheduler) -> dict[str, Any]:
             "waiting": scheduler.waiting.get(dev_id),
             "device_id": reg_device.id if reg_device else None,
             # the record's settings, for the details panel of the card
-            "record": {k: v for k, v in device.items() if k not in (CONF_DEVICE_ID, "name")},
+            "record": {k: v for k, v in device.items() if k != CONF_DEVICE_ID},
             "last_action": scheduler.last_actions.get(dev_id),
             "plan": None,
         }
@@ -89,6 +96,7 @@ def _price_unit(hass: HomeAssistant, entity_id: str) -> str:
 @callback
 def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_plan)
+    websocket_api.async_register_command(hass, ws_update_record)
 
 
 @websocket_api.websocket_command(
@@ -112,3 +120,56 @@ def ws_plan(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg
         if entry_id is None or eid == entry_id
     ]
     connection.send_result(msg["id"], {"entries": result})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/update_record",
+        vol.Required("entry_id"): str,
+        vol.Required("record_id"): str,
+        vol.Required("record"): dict,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_update_record(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Save a device record edited in the card (same checks as the edit form)."""
+    # Imported here: the config flow module is only needed for editing.
+    from .config_flow import _build_record, _validate_record
+    from .scheduler import record_name
+
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "not_found", "Unknown entry")
+        return
+    subentry = next(
+        (
+            sub
+            for sub in entry.subentries.values()
+            if sub.subentry_type == SUBENTRY_TYPE_RECORD
+            and (sub.data.get(CONF_DEVICE_ID) or sub.unique_id) == msg["record_id"]
+        ),
+        None,
+    )
+    if subentry is None:
+        connection.send_error(msg["id"], "not_found", "Unknown record")
+        return
+
+    user_input = {k: v for k, v in msg["record"].items() if v not in (None, "")}
+    errors = _validate_record(hass, user_input)
+    for key in ("duration_hours", "start_offset_minutes"):
+        try:
+            if key in user_input and float(user_input[key]) < 0:
+                errors[key] = "not_a_number"
+        except (TypeError, ValueError):
+            errors[key] = "not_a_number"
+    if errors:
+        connection.send_result(msg["id"], {"ok": False, "errors": errors})
+        return
+
+    record = _build_record(user_input, msg["record_id"])
+    hass.data.setdefault(EDITED_RECORDS, set()).add((entry.entry_id, msg["record_id"]))
+    hass.config_entries.async_update_subentry(
+        entry, subentry, data=record, title=record_name(hass, record)
+    )
+    connection.send_result(msg["id"], {"ok": True})
