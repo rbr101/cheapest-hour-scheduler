@@ -103,6 +103,8 @@ Some devices are started with a service call instead of an entity. Fill in **Act
 
 When you choose an action and leave the data empty, the form comes back after *Submit* with the data field **filled with the action's example data**, the same as *Developer tools → Actions → Fill example data*: every field that has an example, also the ones in collapsed sections. Required fields without an example (such as `device_id`) are added as a commented line, e.g. `# device_id:`. Remove what you don't need and fill in the rest. Data you entered yourself is never overwritten. Submit again with the data still empty to call the action without data.
 
+You may also paste the whole YAML from *Developer tools → Actions* (with `action:` and `data:`); only what is under `data:` and `target:` is sent.
+
 In the data you can use:
 
 | Placeholder | Replaced by |

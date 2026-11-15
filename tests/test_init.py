@@ -669,8 +669,8 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     # The boiler was on already: it stays on and gets the new run time
     start = dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state)
     end = dt_util.parse_datetime(hass.states.get("sensor.boiler_end").state)
-    assert start == slot0 + timedelta(hours=1, minutes=15)  # the running slot
-    assert end == slot0 + timedelta(hours=2, minutes=45)  # new run time is used
+    assert start == slot0 + timedelta(hours=1, minutes=25)  # 5 minutes from now, never in the past
+    assert end == slot0 + timedelta(hours=2, minutes=55)  # new run time is used
     assert hass.states.get("input_boolean.boiler").state == "on"
 
     # The dishwasher is not planned in the past but a few minutes from now,
@@ -698,7 +698,7 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     assert dt_util.parse_datetime(hass.states.get("sensor.pomp_start").state) == soon  # not moved again
 
     # Replanning doesn't send it again; boiler goes off at the new end
-    freezer.move_to(slot0 + timedelta(hours=2, minutes=56))
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=57))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
     # ...and the next run (tomorrow's ready-by) is not squeezed into today's cheap hours
@@ -787,3 +787,24 @@ async def test_replans_window_that_began_without_a_start(hass, hass_storage, fre
     assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
     assert len(calls) == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+def test_action_data_pasted_from_developer_tools():
+    """The whole action YAML (action: / data:) may be pasted; only the data is used."""
+    from custom_components.cheapest_hour_scheduler.scheduler import render_action_data
+
+    pasted = (
+        "action: home_connect.start_selected_program\n"
+        "data:\n"
+        "  device_id: 9c11835a9a1add7e34dbdcf6956e70b8\n"
+        "  b_s_h_common_option_start_in_relative: {seconds_until_start}\n"
+    )
+    assert render_action_data(pasted, 300) == {
+        "device_id": "9c11835a9a1add7e34dbdcf6956e70b8",
+        "b_s_h_common_option_start_in_relative": 300,
+    }
+    assert render_action_data("action: light.turn_on\ntarget:\n  entity_id: light.x\ndata:\n  brightness: 5") == {
+        "entity_id": "light.x", "brightness": 5,
+    }
+    # a real field that happens to be called "data" is left alone
+    assert render_action_data("data: hello") == {"data": "hello"}

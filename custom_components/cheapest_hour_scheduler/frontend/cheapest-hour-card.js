@@ -11,7 +11,7 @@
  * hours: 36                                   # optional, max hours shown
  */
 
-const CARD_VERSION = "0.7.4";
+const CARD_VERSION = "0.7.5";
 const WS_TYPE = "cheapest_hour_scheduler/plan";
 const REFRESH_MS = 60 * 1000;
 
@@ -448,7 +448,8 @@ class CheapestHourCard extends HTMLElement {
       .details-head a { margin-left: 14px; font-size: 12px; color: var(--primary-color); text-decoration: none; cursor: pointer; }
       .details table { border-collapse: collapse; width: 100%; }
       .details th { text-align: left; font-weight: 400; color: var(--secondary-text-color); padding: 2px 12px 2px 0; white-space: nowrap; vertical-align: top; width: 1%; }
-      .details td { padding: 2px 0; word-break: break-word; }
+      .details td { padding: 2px 0; overflow-wrap: anywhere; }
+      .details code, .details pre { overflow-wrap: anywhere; white-space: pre-wrap; }
       .details td.error { color: var(--error-color, #db4437); }
       .details pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
       .details code { font-size: 12px; }

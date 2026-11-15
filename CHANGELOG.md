@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.5] - 2026-11-15
+
+### Fixed
+- Editing a record that was already on (or whose window had begun) put the new start at
+  the beginning of the running quarter, so **in the past**, and ran the action at once.
+  The start is now always 5 minutes from now; a device that is on stays on meanwhile.
+- **Action data pasted from the developer tools** (with `action:` and `data:` lines) made
+  the action fail, because the wrapper was sent as data. Only what is under `data:` (and
+  `target:`) is sent now.
+- Card: long "Last sent" texts were cut off; they wrap now.
+
 ## [0.7.4] - 2026-11-15
 
 ### Added

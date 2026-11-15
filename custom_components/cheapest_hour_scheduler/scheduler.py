@@ -215,6 +215,12 @@ def render_action_data(text: Any, seconds: int = 0) -> dict[str, Any]:
         return {}
     if not isinstance(data, dict):
         raise HomeAssistantError("Action data must be key: value pairs")
+    # Pasted straight from the developer tools (action: ... / data: ...): use
+    # what is under data (and target), not the wrapper itself.
+    if ("action" in data or "service" in data) and (
+        isinstance(data.get("data"), dict) or isinstance(data.get("target"), dict)
+    ):
+        data = {**(data.get("target") or {}), **(data.get("data") or {})}
     return data
 
 
@@ -594,12 +600,18 @@ class CheapestHourScheduler:
                 plan = self._new_plan(device, prev, now)
                 if plan is not None and plan.config is None:
                     plan.config = fingerprint
-                was_on = bool(edited and edited.started and not edited.stopped and edited.end)
-                if plan is not None and plan is not prev and not (was_on and not plan.is_relative):
+                if plan is not None and plan is not prev:
                     self._not_in_past(plan, now)
                 if edited and edited.started and not edited.stopped and edited.end and self.enabled:
-                    # Was on for the old plan: switch back unless the new plan is on now too.
-                    if plan is None or plan.is_relative or not plan.locked(now):
+                    # Was on for the old plan: switch back, unless the new plan
+                    # starts within a few minutes (then it simply stays on).
+                    stays_on = (
+                        plan is not None
+                        and not plan.is_relative
+                        and plan.start <= now + START_DELAY + timedelta(minutes=1)
+                        and plan.run_end > now
+                    )
+                    if not stays_on:
                         await self._run_stop(edited)
                 if plan is None:
                     if prev:
