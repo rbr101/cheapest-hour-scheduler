@@ -71,6 +71,8 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
 TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
+# A new or edited plan never starts in the past: at the earliest this long from now.
+START_DELAY = timedelta(minutes=2)
 PRICE_CACHE_KEEP = timedelta(days=1)
 # The shared block runs at most once a day: the next one starts at least this
 # long after the previous one started (gives some room to move within the day).
@@ -560,8 +562,8 @@ class CheapestHourScheduler:
                     # and plan again with the new settings.
                     prev.cancel()
                     edited, prev = prev, None
-                if prev and prev.locked(now):
-                    new_plans[dev_id] = prev
+                if prev and (prev.locked(now) or now < prev.start <= now + START_DELAY):
+                    new_plans[dev_id] = prev  # running, or about to start
                     continue
                 # A finished run that still has to be switched off.
                 if prev and prev.started and not prev.stopped and prev.end and prev.end <= now and self.enabled:
@@ -570,6 +572,9 @@ class CheapestHourScheduler:
                 plan = self._new_plan(device, prev, now)
                 if plan is not None and plan.config is None:
                     plan.config = fingerprint
+                was_on = bool(edited and edited.started and not edited.stopped and edited.end)
+                if plan is not None and plan is not prev and not (was_on and not plan.is_relative):
+                    self._not_in_past(plan, now)
                 if edited and edited.started and not edited.stopped and edited.end and self.enabled:
                     # Was on for the old plan: switch back unless the new plan is on now too.
                     if plan is None or plan.is_relative or not plan.locked(now):
@@ -593,6 +598,24 @@ class CheapestHourScheduler:
             await self._catch_up(now)
             await self._async_save()
         self._notify()
+
+    def _not_in_past(self, plan: DevicePlan, now: datetime) -> None:
+        """Move a new plan that would start in the past to a few minutes from now.
+
+        The cheapest window may begin in the slot that is already running (after
+        adding or editing a record, or when the cheapest hours are right now).
+        Starting a little later makes sure the device really gets its start.
+        """
+        earliest = (now + START_DELAY).replace(second=0, microsecond=0) + timedelta(minutes=1)
+        if plan.start >= earliest or plan.run_end <= now:
+            return
+        device = plan.device
+        fixed_length = bool(device.get(CONF_READY_BY) or device.get(CONF_DURATION))
+        if fixed_length or plan.run_end <= earliest:
+            plan.run_end += earliest - plan.start  # keep the run time
+        plan.start = earliest
+        if plan.end is not None:
+            plan.end = plan.run_end
 
     # ---------------------------------------------------------------- devices
 

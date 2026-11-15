@@ -3,10 +3,12 @@
 ## [0.7.2] - 2026-11-15
 
 ### Fixed
-- A record whose window had **already begun** when it was planned (for example after
-  changing its ready-by time or run time inside the cheapest hours) was not started
-  when it uses `auto` or `{seconds_until_start}`. It is now started right away
-  (delay 0).
+- **A start is never planned in the past.** When the cheapest window has already begun
+  (after adding a device, changing its ready-by time or run time, switching it on, or
+  when the cheapest hours are right now), the start is set 2 to 3 minutes from now and
+  the run time is kept. Before, the start was put at the beginning of the running
+  quarter, and records using `auto` or `{seconds_until_start}` were then never started.
+  A device that is already on when you edit it simply stays on.
 - **Editing a record now always replans it**, also while it is running or already
   done. Before, a running record kept its old window until that ended.
 - With *ready by*, the run for the next ready-by moment could be planned directly after

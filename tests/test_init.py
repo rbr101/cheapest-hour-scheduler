@@ -341,8 +341,12 @@ async def test_record_description_device_and_switch(hass, freezer):
     assert hass.states.get("sensor.thuisaccu_start").state == "unknown"
     assert hass.states.get("sensor.thuisaccu_start").attributes["waiting"] == "disabled"
 
-    # On again during the block: starts again
+    # On again during the block: starts again, a few minutes from now
     await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.thuisaccu_enabled"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.charger").state == "off"
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=5))
+    async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.charger").state == "on"
 
@@ -616,7 +620,7 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     hass.states.async_set(
         "sensor.price", "0.6", {"prices_today": _prices(slot0, values), "prices_tomorrow": []}
     )
-    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"boiler": {}}})
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"boiler": {}, "pump": {}}})
 
     def at(hours):
         return dt_util.as_local(slot0 + timedelta(hours=hours)).strftime("%H:%M:00")
@@ -655,18 +659,39 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     )
     await hass.async_block_till_done()
 
+    # The boiler was on already: it stays on and gets the new run time
     start = dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state)
     end = dt_util.parse_datetime(hass.states.get("sensor.boiler_end").state)
     assert start == slot0 + timedelta(hours=1, minutes=15)  # the running slot
     assert end == slot0 + timedelta(hours=2, minutes=45)  # new run time is used
     assert hass.states.get("input_boolean.boiler").state == "on"
 
-    # The dishwasher action is sent again, to start right away
+    # The dishwasher is not planned in the past but a few minutes from now,
+    # and the action is sent again with that delay
+    soon = slot0 + timedelta(hours=1, minutes=23)
+    assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
+    assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_end").state) == soon + timedelta(hours=1.5)
     assert len(calls) == 2
-    assert calls[1].data["b_s_h_common_option_start_in_relative"] == 0
+    assert calls[1].data["b_s_h_common_option_start_in_relative"] == 180
+
+    # A device added now also starts a few minutes from now, not in the past
+    result = await _subentry_flow(
+        hass, entry,
+        {"name": "Pomp", "entity_id": "input_boolean.pump", "on_value": "on", "off_value": "off",
+         "duration_hours": 1, "ready_by": at(3), "start_offset_minutes": 0},
+    )
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert dt_util.parse_datetime(hass.states.get("sensor.pomp_start").state) == soon
+    assert hass.states.get("input_boolean.pump").state == "off"
+    freezer.move_to(soon + timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("input_boolean.pump").state == "on"
+    assert dt_util.parse_datetime(hass.states.get("sensor.pomp_start").state) == soon  # not moved again
 
     # Replanning doesn't send it again; boiler goes off at the new end
-    freezer.move_to(slot0 + timedelta(hours=2, minutes=46))
+    freezer.move_to(slot0 + timedelta(hours=2, minutes=56))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
     # ...and the next run (tomorrow's ready-by) is not squeezed into today's cheap hours
