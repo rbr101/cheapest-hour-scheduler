@@ -9,6 +9,7 @@
   the run time is kept. Before, the start was put at the beginning of the running
   quarter, and records using `auto` or `{seconds_until_start}` were then never started.
   A device that is already on when you edit it simply stays on.
+- The **Recalculate** button gave an error (`unexpected keyword argument 'force'`).
 - **Editing a record now always replans it**, also while it is running or already
   done. Before, a running record kept its old window until that ended.
 - With *ready by*, the run for the next ready-by moment could be planned directly after

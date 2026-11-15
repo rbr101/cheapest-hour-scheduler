@@ -31,7 +31,7 @@ class ReplanButton(SchedulerEntity, ButtonEntity):
     _attr_icon = "mdi:refresh"
 
     async def async_press(self) -> None:
-        await self.scheduler.async_plan(force=True)
+        await self.scheduler.async_plan()
 
 
 class RecordTestButton(RecordEntity, ButtonEntity):

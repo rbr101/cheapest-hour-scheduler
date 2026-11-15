@@ -386,6 +386,10 @@ async def test_record_test_buttons(hass):
     await hass.async_block_till_done()
     sched = hass.data[DOMAIN][entry.entry_id]
 
+    # The recalculate button works
+    await hass.services.async_call("button", "press", {"entity_id": "button.test_recalculate"}, blocking=True)
+    assert sched.device_plans["a"].start == slot0 + timedelta(hours=2)
+
     # Start/stop buttons for a switch record; the plan is not touched
     assert hass.states.get("button.thuisaccu_test_start") is not None
     await hass.services.async_call("button", "press", {"entity_id": "button.thuisaccu_test_start"}, blocking=True)
