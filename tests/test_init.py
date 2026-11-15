@@ -814,3 +814,55 @@ def test_action_data_pasted_from_developer_tools():
     assert render_action_data("message: hi\ndata:\n  tag: x") == {"message": "hi", "data": {"tag": "x"}}
     # a real field that happens to be called "data" is left alone
     assert render_action_data("data: hello") == {"data": "hello"}
+
+
+async def test_retries_failed_action(hass, monkeypatch):
+    """A failing action is tried again a few seconds later, 5 times at most."""
+    from homeassistant.core import ServiceCall
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.cheapest_hour_scheduler import scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "RETRY_DELAY", 0)
+    attempts = {"flaky": 0, "broken": 0}
+
+    async def _flaky(call: ServiceCall) -> None:
+        attempts["flaky"] += 1
+        if attempts["flaky"] < 3:
+            raise HomeAssistantError("BSH.Common.Error.400.BadRequest")
+
+    async def _broken(call: ServiceCall) -> None:
+        attempts["broken"] += 1
+        raise HomeAssistantError("appliance offline")
+
+    hass.services.async_register("home_connect", "start_selected_program", _flaky)
+    hass.services.async_register("test", "broken", _broken)
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    hass.states.async_set(
+        "sensor.price", "0.6",
+        {"prices_today": _prices(slot0, [0.6] * 8 + [0.2] * 4 + [0.6] * 20), "prices_tomorrow": []},
+    )
+    entry = _mock_entry(
+        domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [
+            {"id": "dw", "name": "Vaatwasser", "on_value": "on", "action": "home_connect.start_selected_program",
+             "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}"},
+            {"id": "br", "name": "Kapot", "on_value": "on", "action": "test.broken",
+             "action_data": "delay: {seconds_until_start}"},
+        ]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    sched = hass.data[DOMAIN][entry.entry_id]
+
+    # Third try worked
+    assert attempts["flaky"] == 3
+    assert sched.last_actions["dw"]["ok"] and sched.last_actions["dw"]["attempts"] == 3
+    # Gives up after 5 tries and reports the error
+    assert attempts["broken"] == 5
+    assert not sched.last_actions["br"]["ok"] and sched.last_actions["br"]["attempts"] == 5
+    assert "appliance offline" in sched.last_actions["br"]["error"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

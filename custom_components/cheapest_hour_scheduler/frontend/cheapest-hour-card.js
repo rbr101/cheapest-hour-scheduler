@@ -11,7 +11,7 @@
  * hours: 36                                   # optional, max hours shown
  */
 
-const CARD_VERSION = "0.7.6";
+const CARD_VERSION = "0.7.7";
 const WS_TYPE = "cheapest_hour_scheduler/plan";
 const REFRESH_MS = 60 * 1000;
 
@@ -56,6 +56,7 @@ const NL = {
   d_none: "nog niets",
   d_failed: "mislukt",
   d_ok: "gelukt",
+  d_tries: "geprobeerd",
   d_open: "Apparaat openen",
   d_close: "Sluiten",
   yes: "ja",
@@ -93,6 +94,7 @@ const EN = {
   d_none: "nothing yet",
   d_failed: "failed",
   d_ok: "ok",
+  d_tries: "tried",
   d_open: "Open device",
   d_close: "Close",
   yes: "yes",
@@ -245,7 +247,7 @@ class CheapestHourCard extends HTMLElement {
       });
       row(
         L.d_last,
-        `${when} · ${esc(a.what)} · <code>${esc(a.sent)}</code> · ${a.ok ? L.d_ok : `${L.d_failed}: ${esc(a.error)}`}`,
+        `${when} · ${esc(a.what)} · <code>${esc(a.sent)}</code> · ${a.ok ? L.d_ok : `${L.d_failed}: ${esc(a.error)}`}${a.attempts > 1 ? ` (${a.attempts}× ${L.d_tries})` : ""}`,
         a.ok ? "" : "error"
       );
     } else {

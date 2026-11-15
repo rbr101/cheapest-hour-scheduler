@@ -138,6 +138,7 @@ Older alternative: if your dishwasher has a `number.<name>_start_in_relative` en
 
 * The cheapest block is the consecutive window (of the configured length) with the **lowest average price**, starting no earlier than the slot that is running now. On a tie the earliest window wins.
 * Replanning happens when the price sensor changes, every 5 minutes, and with the *Recalculate* button.
+* If sending to a device fails (for example the appliance is briefly unreachable), the integration waits 5 seconds and **tries again, up to 5 times**. The card shows the result under *Last sent*.
 * A block (or a device's own window) that **has started is locked**; it won't move even if new prices arrive.
 * **Editing a record replans it right away**, also when it is running or done.
 * **A start is never planned in the past.** If the cheapest window has already begun when a device is added, edited or switched on, it starts 5 minutes from now and keeps its run time.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.7] - 2026-11-15
+
+### Added
+- **Retry when sending to a device fails**: the integration waits 5 seconds and tries
+  again, up to 5 tries in total. This applies to scheduled starts and stops and to the
+  test buttons. Errors that waiting can't fix (invalid data, unknown action or entity)
+  are not retried. The card's *Last sent* shows how many tries were needed.
+
 ## [0.7.6] - 2026-11-15
 
 ### Fixed

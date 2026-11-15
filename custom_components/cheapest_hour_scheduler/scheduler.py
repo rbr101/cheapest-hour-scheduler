@@ -17,12 +17,13 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any, Awaitable, Callable
 
+import voluptuous as vol
 import yaml
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_point_in_time,
@@ -71,6 +72,9 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 REPLAN_INTERVAL = timedelta(minutes=5)
+# When sending to a device fails: wait and try again, this many tries in total.
+RETRY_ATTEMPTS = 5
+RETRY_DELAY = 5  # seconds
 TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
 # A new or edited plan never starts in the past: at the earliest this long from now.
 START_DELAY = timedelta(minutes=5)
@@ -181,6 +185,10 @@ def _is_relative_value(value: Any) -> bool:
     return text == AUTO_VALUE or SECONDS_PLACEHOLDER in text
 
 
+class ConfigurationError(HomeAssistantError):
+    """The record itself is wrong; trying again won't help."""
+
+
 def record_action(device: dict[str, Any]) -> str:
     """The service a record calls at start ("" when it sets an entity)."""
     return str(device.get(CONF_ACTION) or "").strip()
@@ -210,11 +218,11 @@ def render_action_data(text: Any, seconds: int = 0) -> dict[str, Any]:
     try:
         data = yaml.safe_load(raw)
     except yaml.YAMLError as err:
-        raise HomeAssistantError(f"Invalid action data: {err}") from err
+        raise ConfigurationError(f"Invalid action data: {err}") from err
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise HomeAssistantError("Action data must be key: value pairs")
+        raise ConfigurationError("Action data must be key: value pairs")
     # Pasted straight from the developer tools (action: ... / data: ...): use
     # what is under data (and target), not the wrapper itself.
     # The same goes for data that still has its "data:" line above it.
@@ -725,7 +733,7 @@ class CheapestHourScheduler:
 
         entity_id = device.get(CONF_ENTITY_ID)
         if not entity_id:
-            raise HomeAssistantError("Record has no entity and no action")
+            raise ConfigurationError("Record has no entity and no action")
         raw = str(device.get(CONF_ON_VALUE, "on")).strip()
         if _is_relative_value(raw):
             value = str(seconds) if raw.lower() == AUTO_VALUE else raw.replace(SECONDS_PLACEHOLDER, str(seconds))
@@ -735,20 +743,56 @@ class CheapestHourScheduler:
 
     async def _start_now(self, device: dict[str, Any], start: datetime) -> str:
         """Scheduled start: never raises, errors end up in last_error."""
-        summary = "error"
-        try:
-            summary, run = self._prepare_start(device, start, dt_util.utcnow())
-            await run()
-        except Exception as err:  # noqa: BLE001 - never break the scheduler
-            self.last_error = f"{self.name_of(device)}: {err}"
-            _LOGGER.error("Start of %s failed: %s", self.name_of(device), err)
-            self._log_action(device, "start", summary, err)
-        else:
-            self._log_action(device, "start", summary)
+        summary, error, attempts = await self._send(
+            device, lambda: self._prepare_start(device, start, dt_util.utcnow())
+        )
+        if error is not None:
+            self.last_error = f"{self.name_of(device)}: {error}"
+            _LOGGER.error(
+                "Start of %s failed after %s attempt(s): %s", self.name_of(device), attempts, error
+            )
+        self._log_action(device, "start", summary, error, attempts)
         return summary
 
+    async def _send(
+        self,
+        device: dict[str, Any],
+        prepare: Callable[[], tuple[str, Callable[[], Awaitable[None]]]],
+    ) -> tuple[str, Exception | None, int]:
+        """Send something to a device; on failure wait a few seconds and try again.
+
+        Up to RETRY_ATTEMPTS tries. The value is prepared again for every try, so
+        "seconds until start" stays right. Errors that can't go away by waiting
+        (invalid data, unknown action or entity) are not retried.
+        Returns (what was sent, the last error or None, number of tries).
+        """
+        summary = "error"
+        error: Exception | None = None
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            try:
+                summary, run = prepare()
+                await run()
+            except (vol.Invalid, ServiceNotFound, ConfigurationError) as err:
+                return summary, err, attempt
+            except Exception as err:  # noqa: BLE001 - never break the scheduler
+                error = err
+                if attempt < RETRY_ATTEMPTS:
+                    _LOGGER.warning(
+                        "%s: attempt %s of %s failed (%s), trying again in %s s",
+                        self.name_of(device), attempt, RETRY_ATTEMPTS, err, RETRY_DELAY,
+                    )
+                    await asyncio.sleep(RETRY_DELAY)
+            else:
+                return summary, None, attempt
+        return summary, error, RETRY_ATTEMPTS
+
     def _log_action(
-        self, device: dict[str, Any], what: str, sent: str, error: Exception | None = None
+        self,
+        device: dict[str, Any],
+        what: str,
+        sent: str,
+        error: Exception | None = None,
+        attempts: int = 1,
     ) -> None:
         """Remember the last thing sent to a record's device (shown in the card)."""
         self.last_actions[device[CONF_DEVICE_ID]] = {
@@ -757,6 +801,7 @@ class CheapestHourScheduler:
             "sent": sent,
             "ok": error is None,
             "error": str(error) if error else None,
+            "attempts": attempts,
         }
 
     async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
@@ -798,24 +843,26 @@ class CheapestHourScheduler:
         if device is None:
             raise HomeAssistantError("Unknown record")
         name = self.name_of(device)
-        value = ""
-        try:
-            if action == "stop":
-                value = self.test_value(dev_id, "stop")
-                if value is None:
-                    raise HomeAssistantError("This record has no end value")
-                await self._call(device[CONF_ENTITY_ID], value)
-            else:
+        if action == "stop":
+            stop_value = self.test_value(dev_id, "stop")
+            if stop_value is None:
+                raise HomeAssistantError("This record has no end value")
+            prepare = lambda: (stop_value, lambda: self._call(device[CONF_ENTITY_ID], stop_value))  # noqa: E731
+        else:
+            def prepare():
                 now = dt_util.utcnow()
-                value, run = self._prepare_start(device, self._test_start_moment(dev_id, device, now), now)
-                await run()
-        except Exception as err:
-            self.last_error = f"test {name}: {err}"
-            self._log_action(device, f"test {action}", value or "error", err)
+                return self._prepare_start(device, self._test_start_moment(dev_id, device, now), now)
+
+        value, error, attempts = await self._send(device, prepare)
+        if error is not None:
+            self.last_error = f"test {name}: {error}"
+            self._log_action(device, f"test {action}", value, error, attempts)
             self._notify()
-            raise HomeAssistantError(f"Test {action} of {name} failed: {err}") from err
+            raise HomeAssistantError(
+                f"Test {action} of {name} failed after {attempts} attempt(s): {error}"
+            ) from error
         _LOGGER.info("Test %s of %s: %s", action, name, value)
-        self._log_action(device, f"test {action}", value)
+        self._log_action(device, f"test {action}", value, attempts=attempts)
         self._notify()
         return value
 
@@ -827,21 +874,23 @@ class CheapestHourScheduler:
         off_value = plan.device.get(CONF_OFF_VALUE)
         entity_id = plan.device.get(CONF_ENTITY_ID)
         if off_value not in (None, "") and entity_id:
-            try:
-                await self._call(entity_id, off_value)
-            except Exception as err:  # noqa: BLE001 - never break the scheduler
-                self.last_error = f"{entity_id}: {err}"
-                _LOGGER.error("Failed to set %s to %s: %s", entity_id, off_value, err)
-                self._log_action(plan.device, "stop", str(off_value), err)
-            else:
-                self._log_action(plan.device, "stop", str(off_value))
+            value = str(off_value)
+            _sent, error, attempts = await self._send(
+                plan.device, lambda: (value, lambda: self._call(entity_id, value))
+            )
+            if error is not None:
+                self.last_error = f"{entity_id}: {error}"
+                _LOGGER.error(
+                    "Failed to set %s to %s after %s attempt(s): %s", entity_id, value, attempts, error
+                )
+            self._log_action(plan.device, "stop", value, error, attempts)
         plan.stopped = True
 
     async def _call_action(self, action: str, data: dict[str, Any]) -> None:
         """Call a service such as home_connect.start_selected_program. Raises."""
         domain, _, service = action.partition(".")
         if not service or not self.hass.services.has_service(domain, service):
-            raise HomeAssistantError(f"Action {action} does not exist")
+            raise ConfigurationError(f"Action {action} does not exist")
         await self.hass.services.async_call(domain, service, data, blocking=True)
         _LOGGER.info("Called %s with %s", action, data)
 
@@ -853,12 +902,12 @@ class CheapestHourScheduler:
         target = {"entity_id": entity_id}
 
         if self.hass.states.get(entity_id) is None:
-            raise HomeAssistantError(f"{entity_id} does not exist")
+            raise ConfigurationError(f"{entity_id} does not exist")
         if domain in NUMBER_DOMAINS:
             try:
                 number = float(text)
             except ValueError as err:
-                raise HomeAssistantError(f"'{text}' is not a number") from err
+                raise ConfigurationError(f"'{text}' is not a number") from err
             await self.hass.services.async_call(
                 domain, "set_value", {**target, "value": number}, blocking=True
             )
@@ -879,5 +928,5 @@ class CheapestHourScheduler:
                 domain, "set_hvac_mode", {**target, "hvac_mode": text}, blocking=True
             )
         else:
-            raise HomeAssistantError(f"Don't know how to set {entity_id} to '{text}'")
+            raise ConfigurationError(f"Don't know how to set {entity_id} to '{text}'")
         _LOGGER.info("Set %s to %s", entity_id, text)
