@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.3] - 2026-11-15
+
+### Fixed
+- A "start in X seconds" record (`auto` / `{seconds_until_start}`) that an older version
+  had planned **in the past** stayed there: it showed as running, but its start signal
+  was never sent, and neither editing it nor **Recalculate** planned it again. Such a
+  record is now planned again from the current time and gets its start.
+- **Saving a record in the edit form always replans it**, also the first time after an
+  update and also when nothing was changed.
+
 ## [0.7.2] - 2026-11-15
 
 ### Fixed

@@ -703,3 +703,81 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) >= slot0 + timedelta(hours=3)
     assert hass.states.get("input_boolean.boiler").state == "off"
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_replans_window_that_began_without_a_start(hass, hass_storage, freezer):
+    """A plan left in the past by an older version (never sent) is planned again from now."""
+    from homeassistant.core import ServiceCall
+
+    calls: list[ServiceCall] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("home_connect", "start_selected_program", _record)
+    assert await async_setup_component(hass, "input_boolean", {"input_boolean": {"boiler": {}}})
+
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    freezer.move_to(slot0 + timedelta(minutes=10))
+    hass.states.async_set(
+        "sensor.price", "0.2", {"prices_today": _prices(slot0, [0.2] * 20 + [0.6] * 100), "prices_tomorrow": []}
+    )
+    ready = dt_util.as_local(slot0 + timedelta(hours=5)).strftime("%H:%M:00")
+    washer = {"id": "dw", "name": "Vaatwasser", "on_value": "on", "duration_hours": 4, "ready_by": ready,
+              "action": "home_connect.start_selected_program",
+              "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}"}
+    boiler = {"id": "bo", "name": "Boiler", "entity_id": "input_boolean.boiler", "on_value": "on",
+              "off_value": "off", "duration_hours": 4, "ready_by": ready}
+    entry = _mock_entry(
+        domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [washer, boiler]},
+    )
+    entry.add_to_hass(hass)
+
+    def old_plan(started):
+        return {
+            "start": slot0.isoformat(), "end": None, "run_end": (slot0 + timedelta(hours=4)).isoformat(),
+            "price": 0.2, "deadline": (slot0 + timedelta(hours=5)).isoformat(),
+            "started": started, "stopped": False, "armed_value": None,
+        }
+
+    boiler_plan = {**old_plan(True), "end": (slot0 + timedelta(hours=4)).isoformat()}
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"] = {
+        "version": 1, "key": f"{DOMAIN}.{entry.entry_id}",
+        "data": {"enabled": True, "plans": {"dw": old_plan(True), "bo": boiler_plan}},
+    }
+    hass.states.async_set("input_boolean.boiler", "on")
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Dishwasher: marked started but nothing was ever sent -> planned again from now
+    soon = slot0 + timedelta(minutes=13)
+    assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
+    assert len(calls) == 1 and calls[0].data["b_s_h_common_option_start_in_relative"] == 180
+
+    # Boiler: really on -> its running window is kept
+    assert dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state) == slot0
+
+    # Saving the boiler in the edit form (other run time) replans it, even though the
+    # old plan has no fingerprint yet; it stays on and gets the new end
+    (sub,) = [s for s in entry.subentries.values() if s.unique_id == "bo"]
+    result = await _subentry_flow(
+        hass, entry,
+        {"name": "Boiler", "entity_id": "input_boolean.boiler", "on_value": "on", "off_value": "off",
+         "duration_hours": 2, "ready_by": ready, "start_offset_minutes": 0},
+        subentry_id=sub.subentry_id,
+    )
+    assert result["type"] == "abort"
+    await hass.async_block_till_done()
+    end = dt_util.parse_datetime(hass.states.get("sensor.boiler_end").state)
+    start = dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state)
+    assert end - start == timedelta(hours=2)
+    assert hass.states.get("input_boolean.boiler").state == "on"
+
+    # Recalculate keeps what is planned from now on (no jump back into the past)
+    await hass.services.async_call("button", "press", {"entity_id": "button.test_recalculate"}, blocking=True)
+    assert dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state) == soon
+    assert len(calls) == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)

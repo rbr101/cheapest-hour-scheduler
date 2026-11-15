@@ -51,6 +51,7 @@ from .const import (
     DEFAULT_BLOCK_HOURS,
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
+    EDITED_RECORDS,
     MINUTES_PLACEHOLDER,
     SECONDS_PLACEHOLDER,
     SIGNAL_UPDATE,
@@ -128,6 +129,11 @@ class DevicePlan:
     def locked(self, now: datetime) -> bool:
         """Started and still running: never move it."""
         return self.start <= now < self.run_end
+
+    @property
+    def never_sent(self) -> bool:
+        """A "start in X seconds" record whose start signal was never sent."""
+        return self.is_relative and self.armed_value is None
 
     def same_slot(self, other: DevicePlan | None) -> bool:
         return other is not None and other.start == self.start and other.run_end == self.run_end
@@ -541,6 +547,7 @@ class CheapestHourScheduler:
             self.last_planned = now
 
             new_plans: dict[str, DevicePlan] = {}
+            edited_records: set = self.hass.data.setdefault(EDITED_RECORDS, set())
             for device in self.devices:
                 dev_id = device[CONF_DEVICE_ID]
                 prev = self.device_plans.get(dev_id)
@@ -554,17 +561,28 @@ class CheapestHourScheduler:
                     continue
                 fingerprint = record_fingerprint(device)
                 edited: DevicePlan | None = None
-                if prev and prev.config is None:
+                was_edited = (self.entry.entry_id, dev_id) in edited_records
+                edited_records.discard((self.entry.entry_id, dev_id))
+                if prev and prev.config is None and not was_edited:
                     prev.config = fingerprint  # plan from before fingerprints existed
-                elif prev and prev.config != fingerprint:
+                elif prev and (was_edited or prev.config != fingerprint):
                     # The record was edited (e.g. another ready-by time or run
                     # time): forget the old plan, also when it is running or done,
                     # and plan again with the new settings.
                     prev.cancel()
                     edited, prev = prev, None
-                if prev and (prev.locked(now) or now < prev.start <= now + START_DELAY):
+                # A window that has begun counts as running, except for a "start
+                # in X seconds" record that never got its signal (planned in the
+                # past by an older version): that one is planned again from now.
+                if prev and (
+                    (prev.locked(now) and not prev.never_sent)
+                    or now < prev.start <= now + START_DELAY
+                ):
                     new_plans[dev_id] = prev  # running, or about to start
                     continue
+                if prev and prev.locked(now):
+                    prev.cancel()
+                    prev = None
                 # A finished run that still has to be switched off.
                 if prev and prev.started and not prev.stopped and prev.end and prev.end <= now and self.enabled:
                     await self._run_stop(prev)

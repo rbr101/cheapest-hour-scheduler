@@ -40,6 +40,7 @@ from .const import (
     DEFAULT_BLOCK_HOURS,
     DEFAULT_PRICE_SENSOR,
     DOMAIN,
+    EDITED_RECORDS,
     MINUTES_PLACEHOLDER,
     SECONDS_PLACEHOLDER,
     SUBENTRY_TYPE_RECORD,
@@ -339,6 +340,8 @@ class RecordSubentryFlow(ConfigSubentryFlow):
             subentry = self._get_reconfigure_subentry()
             dev_id = subentry.data.get(CONF_DEVICE_ID) or subentry.unique_id or subentry.subentry_id
             record = _build_record(user_input, dev_id)
+            # Saving the form always replans this record, also without changes.
+            self.hass.data.setdefault(EDITED_RECORDS, set()).add((self._get_entry().entry_id, dev_id))
             return self.async_update_and_abort(
                 self._get_entry(), subentry, data=record, title=record_name(self.hass, record)
             )

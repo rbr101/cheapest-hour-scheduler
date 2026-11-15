@@ -5,6 +5,8 @@ DOMAIN = "cheapest_hour_scheduler"
 CONF_PRICE_SENSOR = "price_sensor"
 CONF_BLOCK_HOURS = "block_hours"
 CONF_DEVICES = "devices"  # legacy: records were stored in options before 0.7
+# hass.data key: {(entry_id, record_id)} saved in the edit form, to be replanned
+EDITED_RECORDS = f"{DOMAIN}_edited_records"
 SUBENTRY_TYPE_RECORD = "record"  # each device record is a config subentry
 
 # Device record keys
