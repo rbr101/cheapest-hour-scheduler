@@ -78,10 +78,7 @@ RETRY_DELAY = 5  # seconds
 TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
 # A new or edited plan never starts in the past: at the earliest this long from now.
 START_DELAY = timedelta(minutes=5)
-PRICE_CACHE_KEEP = timedelta(days=1)
-# The shared block runs at most once a day: the next one starts at least this
-# long after the previous one started (gives some room to move within the day).
-SHARED_BLOCK_MIN_GAP = timedelta(hours=20)  # keep prices of the past day, plus all future ones
+PRICE_CACHE_KEEP = timedelta(days=1)  # keep prices of the past day, plus all future ones
 
 TOGGLE_DOMAINS = {
     "switch",
@@ -246,6 +243,11 @@ def record_name(hass: HomeAssistant, device: dict[str, Any]) -> str:
         return entity_id.split(".", 1)[-1].replace("_", " ").capitalize()
     action = record_action(device)
     return action.split(".", 1)[-1].replace("_", " ").capitalize() if action else "Record"
+
+
+def _next_local_day(moment: datetime) -> datetime:
+    """Local midnight after `moment`: the shared block runs once per calendar day."""
+    return dt_util.start_of_local_day(dt_util.as_local(moment).date() + timedelta(days=1))
 
 
 def record_fingerprint(device: dict[str, Any]) -> str:
@@ -465,7 +467,7 @@ class CheapestHourScheduler:
                 self.slots,
                 self.block_hours,
                 now,
-                not_before=max(old.end, old.start + SHARED_BLOCK_MIN_GAP),
+                not_before=max(old.end, _next_local_day(old.start)),
             )
             if new is None:
                 self.block = None
@@ -474,7 +476,7 @@ class CheapestHourScheduler:
         else:
             not_before = None
             if self._last_block_start is not None:
-                not_before = self._last_block_start + SHARED_BLOCK_MIN_GAP
+                not_before = _next_local_day(self._last_block_start)
             new = find_cheapest_block(self.slots, self.block_hours, now, not_before=not_before)
             if new is None and old and old.end > now:
                 new = old  # keep what we had if data vanished

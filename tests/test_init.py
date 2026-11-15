@@ -1,6 +1,6 @@
 """Integration tests (needs pytest-homeassistant-custom-component)."""
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -918,4 +918,42 @@ async def test_websocket_update_record(hass, hass_ws_client):
     await client.send_json({"id": 4, **base, "record_id": "nope", "record": {}})
     msg = await client.receive_json()
     assert not msg["success"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_next_shared_block_is_cheapest_of_next_day(hass, freezer):
+    """After today's block, the next one is the cheapest of the next calendar day,
+
+    also when that is less than 20 hours after the previous start.
+    """
+    tz = dt_util.get_default_time_zone()
+    day = dt_util.now().date()
+    start = datetime.combine(day, time(8, 0), tzinfo=tz)  # 08:00 local today
+    freezer.move_to(start + timedelta(minutes=1))
+    # 40 hours of quarters from 08:00: cheap 08:45-09:45 today, cheapest 01:00-02:00
+    # tomorrow, and a slightly cheap hour 05:00-06:00 tomorrow (>= 20 h after 08:45)
+    values = [0.6] * 160
+    for i in range(3, 7):
+        values[i] = 0.05
+    for i in range(68, 72):
+        values[i] = 0.1
+    for i in range(84, 88):
+        values[i] = 0.3
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(start, values), "prices_tomorrow": []}
+    )
+    entry = _mock_entry(domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    first = dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state)
+    assert first == start + timedelta(minutes=45)
+
+    # After the block: not again today (the afternoon is not used), but the cheapest
+    # hour of tomorrow, 01:00, which is only 16 h 15 min after the previous start.
+    freezer.move_to(start + timedelta(hours=2))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    nxt = dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state)
+    assert nxt == start + timedelta(hours=17)
     assert await hass.config_entries.async_unload(entry.entry_id)

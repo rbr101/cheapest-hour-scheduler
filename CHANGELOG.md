@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.9] - 2026-11-15
+
+### Fixed
+- **The next cheapest block could be wrong.** After a block had run, the next one had to
+  start at least 20 hours after the previous start. A block that ran at 08:45 pushed the
+  next one to 04:45 or later, even when the night before was cheaper. The shared block
+  now runs once per calendar day: the next block is the cheapest of the next day, from
+  midnight.
+
 ## [0.7.8] - 2026-11-15
 
 ### Added

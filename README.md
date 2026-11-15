@@ -142,7 +142,7 @@ Older alternative: if your dishwasher has a `number.<name>_start_in_relative` en
 * A block (or a device's own window) that **has started is locked**; it won't move even if new prices arrive.
 * **Editing a record replans it right away**, also when it is running or done.
 * **A start is never planned in the past.** If the cheapest window has already begun when a device is added, edited or switched on, it starts 5 minutes from now and keeps its run time.
-* The shared block runs **at most once a day**: the next block starts at least 20 hours after the previous one started. With Zonneplan the next block is usually known in the afternoon, when tomorrow's prices are published. Records with *ready by* run once per ready-by moment.
+* The shared block runs **once per calendar day**: after a block has run, the next one is the cheapest block of the next day (from midnight). With Zonneplan the next block is usually known in the afternoon, when tomorrow's prices are published. Records with *ready by* run once per ready-by moment.
 * **Price data is stored.** Every update of the price sensor is merged into a local copy (kept in `.storage`, prices of the past day plus all future ones). When the sensor is unavailable, restarting, or temporarily shows less data, planning continues with the stored prices. The attributes `price_source` (`sensor` / `cache` / `none`) and `prices_known_until` on the block-start sensor show what is being used.
 * The plan and which actions were already executed are stored, so a restart doesn't switch things twice. If HA was down at the start moment but the run time has not passed yet, the start action is applied as soon as HA is back.
 
