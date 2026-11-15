@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6] - 2026-11-15
+
+### Fixed
+- Action data that still had its `data:` line above the fields (without an `action:`
+  line) was sent as one field called `data` and rejected ("not a valid option at 'data'").
+  The fields under `data:` are sent now.
+
 ## [0.7.5] - 2026-11-15
 
 ### Fixed

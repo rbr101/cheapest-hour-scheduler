@@ -217,7 +217,9 @@ def render_action_data(text: Any, seconds: int = 0) -> dict[str, Any]:
         raise HomeAssistantError("Action data must be key: value pairs")
     # Pasted straight from the developer tools (action: ... / data: ...): use
     # what is under data (and target), not the wrapper itself.
-    if ("action" in data or "service" in data) and (
+    # The same goes for data that still has its "data:" line above it.
+    wrapper_keys = {"action", "service", "data", "target"}
+    if set(data) <= wrapper_keys and (
         isinstance(data.get("data"), dict) or isinstance(data.get("target"), dict)
     ):
         data = {**(data.get("target") or {}), **(data.get("data") or {})}

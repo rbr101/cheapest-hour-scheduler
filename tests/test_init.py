@@ -806,5 +806,11 @@ def test_action_data_pasted_from_developer_tools():
     assert render_action_data("action: light.turn_on\ntarget:\n  entity_id: light.x\ndata:\n  brightness: 5") == {
         "entity_id": "light.x", "brightness": 5,
     }
+    # only the "data:" line left above the fields
+    assert render_action_data("data:\n  device_id: abc\n  b_s_h_common_option_start_in_relative: 121") == {
+        "device_id": "abc", "b_s_h_common_option_start_in_relative": 121,
+    }
+    # real fields next to a field called "data" are left alone
+    assert render_action_data("message: hi\ndata:\n  tag: x") == {"message": "hi", "data": {"tag": "x"}}
     # a real field that happens to be called "data" is left alone
     assert render_action_data("data: hello") == {"data": "hello"}
