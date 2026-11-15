@@ -78,6 +78,9 @@ RETRY_DELAY = 5  # seconds
 TEST_RELATIVE_DELAY = timedelta(minutes=1)  # test of an 'auto' record without a plan
 # A new or edited plan never starts in the past: at the earliest this long from now.
 START_DELAY = timedelta(minutes=5)
+# "Start in X seconds" records get their signal this long before the planned start
+# (not hours ahead: the plan can still move, and the appliance may still be busy).
+ARM_LEAD = timedelta(minutes=15)
 PRICE_CACHE_KEEP = timedelta(days=1)  # keep prices of the past day, plus all future ones
 
 TOGGLE_DOMAINS = {
@@ -245,11 +248,6 @@ def record_name(hass: HomeAssistant, device: dict[str, Any]) -> str:
     return action.split(".", 1)[-1].replace("_", " ").capitalize() if action else "Record"
 
 
-def _next_local_day(moment: datetime) -> datetime:
-    """Local midnight after `moment`: the shared block runs once per calendar day."""
-    return dt_util.start_of_local_day(dt_util.as_local(moment).date() + timedelta(days=1))
-
-
 def record_fingerprint(device: dict[str, Any]) -> str:
     """Changes when the record is edited (the description doesn't count)."""
     return json.dumps(
@@ -295,7 +293,10 @@ class CheapestHourScheduler:
         # when the price sensor is unavailable or temporarily has less data.
         self._price_cache: dict[datetime, PriceSlot] = {}
         self.price_source: str = "none"  # "sensor", "cache" or "none"
-        self._last_block_start: datetime | None = None  # last finished shared block
+        # Shared block bookkeeping: how far the prices reached when the current
+        # block was chosen, and when the last finished block was chosen.
+        self._block_horizon: datetime | None = None
+        self._done_horizon: datetime | None = None
         self.record_enabled: dict[str, bool] = {}  # dev_id -> on/off (default on)
         # dev_id -> what was last sent to the device and whether that worked
         self.last_actions: dict[str, dict[str, Any]] = {}
@@ -344,8 +345,10 @@ class CheapestHourScheduler:
             k: bool(v) for k, v in (stored.get("record_enabled") or {}).items()
         }
         self.last_actions = dict(stored.get("last_actions") or {})
-        if stored.get("last_block_start"):
-            self._last_block_start = dt_util.parse_datetime(stored["last_block_start"])
+        if stored.get("block_horizon"):
+            self._block_horizon = dt_util.parse_datetime(stored["block_horizon"])
+        if stored.get("done_horizon"):
+            self._done_horizon = dt_util.parse_datetime(stored["done_horizon"])
 
         for item in stored.get("prices") or []:
             try:
@@ -376,8 +379,10 @@ class CheapestHourScheduler:
         }
         data["record_enabled"] = self.record_enabled
         data["last_actions"] = self.last_actions
-        if self._last_block_start:
-            data["last_block_start"] = self._last_block_start.isoformat()
+        if self._block_horizon:
+            data["block_horizon"] = self._block_horizon.isoformat()
+        if self._done_horizon:
+            data["done_horizon"] = self._done_horizon.isoformat()
         if self.block:
             data["block"] = {
                 "start": self.block.start.isoformat(),
@@ -458,30 +463,40 @@ class CheapestHourScheduler:
         return max(slot.end for slot in self._price_cache.values())
 
     def _plan_shared_block(self, now: datetime) -> None:
-        """The entry-wide block, used by records without a ready-by time."""
+        """The entry-wide block, used by records without a ready-by time.
+
+        Every time, the cheapest block is searched over all price data that is
+        available from now on. One thing is remembered: once a block has run, the
+        prices it was chosen from are used up. The next block is only chosen when
+        new prices have arrived (normally tomorrow's, in the afternoon), so the
+        leftover, more expensive hours of the same data don't trigger a second run.
+        """
         old = self.block
+        horizon = self.slots[-1].end if self.slots else None
         if old and old.start <= now < old.end:
+            if self._block_horizon is None:
+                self._block_horizon = horizon
             new = old  # running: locked
-        elif old and old.end <= now:
-            new = find_cheapest_block(
-                self.slots,
-                self.block_hours,
-                now,
-                not_before=max(old.end, _next_local_day(old.start)),
-            )
-            if new is None:
-                self.block = None
-                self._last_block_start = old.start
-                return
         else:
             not_before = None
-            if self._last_block_start is not None:
-                not_before = _next_local_day(self._last_block_start)
-            new = find_cheapest_block(self.slots, self.block_hours, now, not_before=not_before)
-            if new is None and old and old.end > now:
+            if old and old.end <= now:
+                # Finished: its price data is used up.
+                self._done_horizon = self._block_horizon or horizon
+                self._block_horizon = None
+                not_before = old.end
+                old = None
+            new_data = (
+                self._done_horizon is None or (horizon is not None and horizon > self._done_horizon)
+            )
+            new = (
+                find_cheapest_block(self.slots, self.block_hours, now, not_before=not_before)
+                if new_data
+                else None
+            )
+            if new is not None:
+                self._block_horizon = horizon
+            elif old and old.end > now:
                 new = old  # keep what we had if data vanished
-        if old and old.end <= now:
-            self._last_block_start = old.start
         # Fill in slots for a block restored from storage.
         if new and not new.slots and self.slots:
             match = tuple(s for s in self.slots if new.start <= s.start < new.end)
@@ -519,6 +534,11 @@ class CheapestHourScheduler:
         if prev and prev.finished(now) and prev.deadline:
             base = max(now, prev.deadline)  # done for that deadline -> next one
         deadline = next_occurrence(base, ready_by, tz)
+        if deadline - timedelta(hours=hours) < now:
+            # Too late to be ready in time (e.g. the record was added or edited
+            # shortly before its ready-by time): don't rush a start now, plan for
+            # the next ready-by moment.
+            deadline = next_occurrence(deadline, ready_by, tz)
         latest_start = deadline - timedelta(hours=hours)
         # One run per ready-by moment: it belongs to the 24 hours before it, so the
         # run for tomorrow can't start right after today's run in the same cheap hours.
@@ -681,10 +701,15 @@ class CheapestHourScheduler:
                 # e.g. dishwasher "start in X seconds": sent once per planned start
                 # moment; a moved start creates a fresh plan (armed_value None).
                 if not plan.started and plan.armed_value is None and now < plan.run_end:
-                    # Start in the future: send the delay. Start moment already
-                    # reached (planned inside the running slot, or HA was down):
-                    # send it with a delay of 0 so the device starts right away.
-                    await self._arm_relative(plan, now)
+                    # Send the delay shortly before the start. Start moment already
+                    # reached (HA was down): send it with a delay of 0.
+                    arm_at = plan.start - ARM_LEAD
+                    if now >= arm_at:
+                        await self._arm_relative(plan, now)
+                    else:
+                        plan.unsubs.append(
+                            async_track_point_in_time(self.hass, self._timer_cb(plan, "arm"), arm_at)
+                        )
                 if not plan.started and plan.start <= now:
                     plan.started = True
             elif not plan.started:
@@ -705,13 +730,19 @@ class CheapestHourScheduler:
 
     def _timer_cb(self, plan: DevicePlan, what: str):
         async def _cb(_now: datetime) -> None:
-            if not self.enabled or self.device_plans.get(plan.dev_id) is not plan:
-                return
-            if what == "start" and not plan.started:
-                await self._run_start(plan)
-            elif what == "stop" and not plan.stopped:
-                await self._run_stop(plan)
-            await self._async_save()
+            # Same lock as planning, so a timer and a recalculation that fall at
+            # the same moment never send the same thing twice.
+            async with self._lock:
+                if not self.enabled or self.device_plans.get(plan.dev_id) is not plan:
+                    return
+                if what == "arm":
+                    if plan.armed_value is None and not plan.started:
+                        await self._arm_relative(plan, dt_util.utcnow())
+                elif what == "start" and not plan.started:
+                    await self._run_start(plan)
+                elif what == "stop" and not plan.stopped:
+                    await self._run_stop(plan)
+                await self._async_save()
             self._notify()
 
         return _cb
@@ -807,8 +838,12 @@ class CheapestHourScheduler:
         }
 
     async def _arm_relative(self, plan: DevicePlan, now: datetime) -> None:
-        # Sent once per planned start moment, also when it fails (no retry storm).
-        plan.armed_value = await self._start_now(plan.device, plan.start)
+        summary = await self._start_now(plan.device, plan.start)
+        ok = (self.last_actions.get(plan.dev_id) or {}).get("ok")
+        # Failed while there is still time: leave it open, the next recalculation
+        # (every 5 minutes) tries again. At the start moment it is final.
+        if ok or now >= plan.start - REPLAN_INTERVAL:
+            plan.armed_value = summary
 
     # -------------------------------------------------------------------- test
 

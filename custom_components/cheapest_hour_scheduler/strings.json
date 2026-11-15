@@ -60,7 +60,7 @@
             "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start.",
             "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
             "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program.",
-            "action_data": "YAML data for the action (what goes under data:). Use {seconds_until_start} or {minutes_until_start} for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = call without data.",
+            "action_data": "YAML data for the action (what goes under data:). Use {seconds_until_start} or {minutes_until_start} for the time until the planned start; the action is then called 15 minutes before the start, like 'auto'. Empty = call without data.",
             "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block.",
             "duration_hours": "How long it must stay on. Empty = until the end of the block.",
             "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by')."
@@ -86,7 +86,7 @@
             "on_value": "'on' for switches; a number for number entities; 'auto' (or text containing {seconds_until_start}) sends the number of seconds until the start.",
             "off_value": "Usually 'off'. Leave empty to do nothing at the end.",
             "action": "Service to call at the start instead of setting the entity, e.g. home_connect.start_selected_program.",
-            "action_data": "YAML data for the action (what goes under data:). Use {seconds_until_start} or {minutes_until_start} for the time until the planned start; the action is then called ahead of time, like 'auto'. Empty = call without data.",
+            "action_data": "YAML data for the action (what goes under data:). Use {seconds_until_start} or {minutes_until_start} for the time until the planned start; the action is then called 15 minutes before the start, like 'auto'. Empty = call without data.",
             "ready_by": "Time the device must be finished. The device then gets its own cheapest window of 'run time' hours (or the block length) that ends before this time, e.g. 07:00. Empty = follow the shared block.",
             "duration_hours": "How long it must stay on. Empty = until the end of the block.",
             "start_offset_minutes": "Start this many minutes after the block starts (only without 'ready by')."

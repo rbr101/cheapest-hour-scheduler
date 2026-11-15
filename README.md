@@ -112,7 +112,7 @@ In the data you can use:
 | `{seconds_until_start}` | seconds from now until the planned start (whole minutes) |
 | `{minutes_until_start}` | minutes from now until the planned start |
 
-With a placeholder the action is called **as soon as the start is planned** (like `auto`), so the appliance can delay its own start. Without a placeholder the action is called **at** the start moment.
+With a placeholder the action is called **15 minutes before the planned start**, with the time that is left until the start, so the appliance delays its own start. Without a placeholder the action is called **at** the start moment.
 
 #### Dishwasher example (Home Connect)
 Home Connect starts a program with a delay through `home_connect.start_selected_program`:
@@ -128,9 +128,9 @@ Home Connect starts a program with a delay through `home_connect.start_selected_
 
 Find the `device_id` via *Developer tools → Actions*: pick `home_connect.start_selected_program`, select your dishwasher and switch to YAML mode.
 
-As soon as the start is planned, the program is started with the delay until that start (rounded down to whole minutes). After that the integration doesn't touch it anymore; the dishwasher runs its own program. Select the program and enable remote start on the dishwasher as usual.
+15 minutes before the planned start, the program is started with the delay until that start (rounded down to whole minutes). After that the integration doesn't touch it anymore; the dishwasher runs its own program. Select the program and enable remote start on the dishwasher as usual.
 
-If the planned start moves (for the shared block this can happen when tomorrow's prices arrive) the action is called again, which Home Connect may refuse while a delayed start is already pending. With **ready by** the start is only fixed once the prices up to that time are known, so it's called once.
+Because the action is only called 15 minutes before the start, a plan that moves earlier in the day (for example when tomorrow's prices arrive) doesn't reach the dishwasher. If the call fails, it is tried again 5 times, and again at every recalculation until the start moment.
 
 Older alternative: if your dishwasher has a `number.<name>_start_in_relative` entity, use that entity with value at start `auto`.
 
@@ -142,7 +142,8 @@ Older alternative: if your dishwasher has a `number.<name>_start_in_relative` en
 * A block (or a device's own window) that **has started is locked**; it won't move even if new prices arrive.
 * **Editing a record replans it right away**, also when it is running or done.
 * **A start is never planned in the past.** If the cheapest window has already begun when a device is added, edited or switched on, it starts 5 minutes from now and keeps its run time.
-* The shared block runs **once per calendar day**: after a block has run, the next one is the cheapest block of the next day (from midnight). With Zonneplan the next block is usually known in the afternoon, when tomorrow's prices are published. Records with *ready by* run once per ready-by moment.
+* The cheapest block is always searched over **all price data that is available** from now on. Once a block has run, its data is used up: the next block is chosen when new prices arrive (with Zonneplan in the afternoon, tomorrow's prices), so the leftover, more expensive hours don't cause a second run. Records with *ready by* run once per ready-by moment.
+* A record that is added or edited too shortly before its *ready by* time to finish in time is planned for the next ready-by moment; it is not started in a rush.
 * **Price data is stored.** Every update of the price sensor is merged into a local copy (kept in `.storage`, prices of the past day plus all future ones). When the sensor is unavailable, restarting, or temporarily shows less data, planning continues with the stored prices. The attributes `price_source` (`sensor` / `cache` / `none`) and `prices_known_until` on the block-start sensor show what is being used.
 * The plan and which actions were already executed are stored, so a restart doesn't switch things twice. If HA was down at the start moment but the run time has not passed yet, the start action is applied as soon as HA is back.
 

@@ -60,7 +60,7 @@
             "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start.",
             "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
             "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program.",
-            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
+            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan 15 minuten voor de start aangeroepen, net als bij 'auto'. Leeg = zonder data.",
             "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok.",
             "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
             "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om')."
@@ -86,7 +86,7 @@
             "on_value": "'on' voor switches; een getal voor number-entiteiten; 'auto' (of tekst met {seconds_until_start}) stuurt het aantal seconden tot de start.",
             "off_value": "Meestal 'off'. Leeg laten = aan het eind niets doen.",
             "action": "Service die bij de start wordt aangeroepen in plaats van de entiteit te zetten, bv. home_connect.start_selected_program.",
-            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan vooraf aangeroepen, net als bij 'auto'. Leeg = zonder data.",
+            "action_data": "YAML-data voor de actie (wat onder data: komt). Gebruik {seconds_until_start} of {minutes_until_start} voor de tijd tot de geplande start; de actie wordt dan 15 minuten voor de start aangeroepen, net als bij 'auto'. Leeg = zonder data.",
             "ready_by": "Tijd waarop het apparaat klaar moet zijn. Het apparaat krijgt dan een eigen goedkoopste venster van 'looptijd' uren (of de bloklengte) dat vóór deze tijd eindigt, bv. 07:00. Leeg = volgt het gedeelde blok.",
             "duration_hours": "Hoe lang hij aan moet blijven. Leeg = tot het eind van het blok.",
             "start_offset_minutes": "Zoveel minuten na het begin van het blok starten (alleen zonder 'klaar om')."

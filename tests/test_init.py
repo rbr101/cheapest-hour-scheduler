@@ -1,5 +1,6 @@
 """Integration tests (needs pytest-homeassistant-custom-component)."""
 
+import asyncio
 from datetime import datetime, time, timedelta
 
 import pytest
@@ -85,10 +86,13 @@ async def test_schedules_devices(hass, freezer):
     assert float(hass.states.get("sensor.test_block_average_price").state) == pytest.approx(0.3)
     assert hass.states.get("binary_sensor.test_cheapest_block_active").state == "off"
 
-    # Dishwasher got seconds until start (~2h, rounded to minutes)
-    secs = float(hass.states.get("input_number.dishwasher").state)
-    expected = (slot0 + timedelta(hours=2) - dt_util.utcnow()).total_seconds()
-    assert abs(secs - expected) <= 120
+    # Nothing is sent to the dishwasher hours ahead...
+    assert float(hass.states.get("input_number.dishwasher").state) == 0
+    # ...but 15 minutes before the start it gets the seconds until the start
+    freezer.move_to(slot0 + timedelta(hours=1, minutes=46))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert float(hass.states.get("input_number.dishwasher").state) == 840
     assert hass.states.get("input_boolean.charger").state == "off"
 
     # Jump into the block
@@ -448,14 +452,17 @@ async def test_record_with_action(hass, freezer):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # Relative action: called right away with the seconds until the block start
+    # Relative action: not called hours ahead, but 15 minutes before the block
+    # start, with the seconds that are left until the start
+    assert len(calls) == 0
+    freezer.move_to(slot0 + timedelta(hours=1, minutes=46))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
     assert len(calls) == 1
     call = calls[0]
     assert (call.domain, call.service) == ("home_connect", "start_selected_program")
     assert call.data["device_id"] == "9c11835a9a1add7e34dbdcf6956e70b8"
-    expected = (slot0 + timedelta(hours=2) - dt_util.utcnow()).total_seconds()
-    assert abs(call.data["b_s_h_common_option_start_in_relative"] - expected) <= 120
-    assert call.data["b_s_h_common_option_start_in_relative"] % 60 == 0
+    assert call.data["b_s_h_common_option_start_in_relative"] == 840
 
     # Plain action without data: called at the block start, without data
     freezer.move_to(slot0 + timedelta(hours=2, minutes=1))
@@ -644,9 +651,9 @@ async def test_edit_ready_by_inside_cheapest_hours(hass, freezer):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    # Planned at the start of the cheap hours; dishwasher got its delay
+    # Planned at the start of the cheap hours; nothing sent to the dishwasher yet
     assert dt_util.parse_datetime(hass.states.get("sensor.boiler_start").state) == slot0 + timedelta(hours=1)
-    assert len(calls) == 1 and calls[0].data["b_s_h_common_option_start_in_relative"] > 0
+    assert len(calls) == 0
 
     # 20 minutes into the cheap hours both are running
     freezer.move_to(slot0 + timedelta(hours=1, minutes=20))
@@ -816,7 +823,7 @@ def test_action_data_pasted_from_developer_tools():
     assert render_action_data("data: hello") == {"data": "hello"}
 
 
-async def test_retries_failed_action(hass, monkeypatch):
+async def test_retries_failed_action(hass, monkeypatch, freezer):
     """A failing action is tried again a few seconds later, 5 times at most."""
     from homeassistant.core import ServiceCall
     from homeassistant.exceptions import HomeAssistantError
@@ -857,6 +864,13 @@ async def test_retries_failed_action(hass, monkeypatch):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     sched = hass.data[DOMAIN][entry.entry_id]
+    freezer.move_to(slot0 + timedelta(hours=1, minutes=50))  # within 15 min of the start
+    async_fire_time_changed(hass)
+    for _ in range(100):  # the retries are spread over several event-loop rounds
+        await hass.async_block_till_done()
+        if attempts["broken"] >= 5 and "br" in sched.last_actions:
+            break
+        await asyncio.sleep(0)
 
     # Third try worked
     assert attempts["flaky"] == 3
@@ -921,39 +935,85 @@ async def test_websocket_update_record(hass, hass_ws_client):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_next_shared_block_is_cheapest_of_next_day(hass, freezer):
-    """After today's block, the next one is the cheapest of the next calendar day,
-
-    also when that is less than 20 hours after the previous start.
-    """
+async def test_shared_block_uses_all_available_data(hass, freezer):
+    """The block is the cheapest over all available data; a block that has run uses
+    up its data, and the next one is chosen when new prices arrive."""
     tz = dt_util.get_default_time_zone()
     day = dt_util.now().date()
     start = datetime.combine(day, time(8, 0), tzinfo=tz)  # 08:00 local today
     freezer.move_to(start + timedelta(minutes=1))
-    # 40 hours of quarters from 08:00: cheap 08:45-09:45 today, cheapest 01:00-02:00
-    # tomorrow, and a slightly cheap hour 05:00-06:00 tomorrow (>= 20 h after 08:45)
-    values = [0.6] * 160
+    # Today 08:00-24:00: cheap 08:45-09:45, the rest expensive with a small dip at 20:00
+    today = [0.6] * 64
     for i in range(3, 7):
-        values[i] = 0.05
-    for i in range(68, 72):
-        values[i] = 0.1
-    for i in range(84, 88):
-        values[i] = 0.3
+        today[i] = 0.05
+    for i in range(48, 52):
+        today[i] = 0.5
     hass.states.async_set(
-        "sensor.price", "0.6", {"prices_today": _prices(start, values), "prices_tomorrow": []}
+        "sensor.price", "0.6", {"prices_today": _prices(start, today), "prices_tomorrow": []}
     )
     entry = _mock_entry(domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    first = dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state)
-    assert first == start + timedelta(minutes=45)
+    assert dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state) == start + timedelta(minutes=45)
 
-    # After the block: not again today (the afternoon is not used), but the cheapest
-    # hour of tomorrow, 01:00, which is only 16 h 15 min after the previous start.
+    # After the block, with the same data: no second run in today's leftover hours
     freezer.move_to(start + timedelta(hours=2))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
-    nxt = dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state)
-    assert nxt == start + timedelta(hours=17)
+    assert hass.states.get("sensor.test_block_start").state == "unknown"
+
+    # Tomorrow's prices arrive: cheapest over everything from now on. That is
+    # 01:00 tomorrow, only 16 h 15 min after the previous start (no 20-hour rule).
+    midnight = start + timedelta(hours=16)
+    tomorrow = [0.6] * 96
+    for i in range(4, 8):
+        tomorrow[i] = 0.1
+    for i in range(20, 24):
+        tomorrow[i] = 0.3
+    freezer.move_to(start + timedelta(hours=6))
+    hass.states.async_set(
+        "sensor.price", "0.6",
+        {"prices_today": _prices(start, today), "prices_tomorrow": _prices(midnight, tomorrow)},
+    )
+    await hass.async_block_till_done()
+    assert dt_util.parse_datetime(hass.states.get("sensor.test_block_start").state) == midnight + timedelta(hours=1)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_ready_by_too_soon_waits_for_next_moment(hass, freezer):
+    """A record added shortly before its ready-by time is not started in a rush."""
+    from homeassistant.core import ServiceCall
+
+    calls: list[ServiceCall] = []
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    hass.services.async_register("home_connect", "start_selected_program", _record)
+    now = dt_util.utcnow().replace(second=0, microsecond=0)
+    slot0 = now - timedelta(minutes=now.minute % 15)
+    freezer.move_to(slot0 + timedelta(minutes=13))
+    hass.states.async_set(
+        "sensor.price", "0.6", {"prices_today": _prices(slot0, [0.6] * 60 + [0.2] * 16 + [0.6] * 100), "prices_tomorrow": []}
+    )
+    ready = dt_util.as_local(slot0 + timedelta(minutes=15)).strftime("%H:%M:00")  # 2 minutes from now
+    entry = _mock_entry(
+        domain=DOMAIN, title="Test", data={"price_sensor": "sensor.price", "block_hours": 1},
+        options={"devices": [
+            {"id": "dw", "name": "Vaatwasser", "on_value": "on", "duration_hours": 4, "ready_by": ready,
+             "action": "home_connect.start_selected_program",
+             "action_data": "device_id: abc\nb_s_h_common_option_start_in_relative: {seconds_until_start}"},
+        ]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Planned for the next ready-by moment (tomorrow), in the cheap hours; not now
+    plan_start = dt_util.parse_datetime(hass.states.get("sensor.vaatwasser_start").state)
+    assert plan_start == slot0 + timedelta(hours=15)
+    attrs = hass.states.get("sensor.vaatwasser_start").attributes
+    assert dt_util.parse_datetime(attrs["ready_by"]) == slot0 + timedelta(hours=24, minutes=15)
+    assert len(calls) == 0  # and nothing is sent to the appliance now
     assert await hass.config_entries.async_unload(entry.entry_id)

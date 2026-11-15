@@ -3,11 +3,22 @@
 ## [0.7.9] - 2026-11-15
 
 ### Fixed
-- **The next cheapest block could be wrong.** After a block had run, the next one had to
-  start at least 20 hours after the previous start. A block that ran at 08:45 pushed the
-  next one to 04:45 or later, even when the night before was cheaper. The shared block
-  now runs once per calendar day: the next block is the cheapest of the next day, from
-  midnight.
+- **Wrong cheapest block.** The next block had to start at least 20 hours after the
+  previous start, so a block at 08:45 pushed the next one to 04:45 or later and cheaper
+  night hours were skipped. The cheapest block is now always searched over **all
+  available price data** from now on. A block that has run uses up its data; the next
+  block is chosen when new prices arrive, so leftover expensive hours don't cause a
+  second run.
+- **A device was started again right before its ready-by time.** A record that was added
+  or edited too shortly before its ready-by time to finish in time was started at once.
+  It is now planned for the next ready-by moment.
+- A timer and a recalculation at the same moment could send the same start twice.
+
+### Changed
+- Records with `auto` or `{seconds_until_start}` get their start signal **15 minutes
+  before the planned start** instead of as soon as it is planned (which could be many
+  hours ahead, while the appliance was still busy). If sending fails, it is tried again
+  at every recalculation until the start moment.
 
 ## [0.7.8] - 2026-11-15
 
